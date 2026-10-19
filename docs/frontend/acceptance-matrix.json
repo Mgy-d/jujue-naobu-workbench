@@ -1,0 +1,750 @@
+{
+  "date": "2026-10-19",
+  "status": "planned-not-executed",
+  "commonCases": 28,
+  "optionSpecificCases": {
+    "A": 4,
+    "B": 4
+  },
+  "cases": [
+    {
+      "id": "AC01",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "站点导航与内容入口",
+      "steps": "从首页进入列表、详情、我的项目、我的成果，再返回。",
+      "expected": "路由与可见页面一致，浏览器前进/后退可恢复正确位置，无重复隐藏应用。",
+      "taskIds": [
+        "A-F04",
+        "B-F04"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC02",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "公开介绍与完整演练分开",
+      "steps": "打开没有全文的公开作品，再进入观演完整演练。",
+      "expected": "公开介绍不出现全文或伪造复现动作；完整演练创建带模拟标签的独立项目。",
+      "taskIds": [
+        "A-F04",
+        "B-F04"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC03",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "项目身份与无效路由",
+      "steps": "建立自定义项目，刷新深链接，再打开不存在的projectId。",
+      "expected": "恢复同一项目；未知项目显示可返回入口，不默认落入别人的或上一个项目。",
+      "taskIds": [
+        "A-F04",
+        "A-F05",
+        "B-F04",
+        "B-F05"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC04",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "七阶段前置条件",
+      "steps": "在无当前问卷反馈、无调查证据或未完成本轮运行时尝试推进。",
+      "expected": "阶段、采用版本和确认状态不改变，返回具体缺项。",
+      "taskIds": [
+        "A-F02",
+        "B-F02"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC05",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "上游改变后的失效",
+      "steps": "保存并确认问卷后修改题干或选项。",
+      "expected": "旧反馈失效；相关已采用成果需重新核对，历史正文保留。",
+      "taskIds": [
+        "A-F02",
+        "A-F06",
+        "B-F02",
+        "B-F06"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC06",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "历史卡固定版本",
+      "steps": "生成同类成果v1/v2，点击旧消息中的v1卡。",
+      "expected": "正文、版本号和来源均为v1，不自动跳到当前最新版。",
+      "taskIds": [
+        "A-F02",
+        "A-F08",
+        "B-F02",
+        "B-F08"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC07",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "草稿、保存与采用区分",
+      "steps": "编辑未保存、保存、确认采用，分别查看预览和成果状态。",
+      "expected": "草稿不冒充已保存；保存不等于采用；采用状态与明确动作对应。",
+      "taskIds": [
+        "A-F02",
+        "A-F05",
+        "B-F02",
+        "B-F05"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC08",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "29题长问卷操作",
+      "steps": "搜索Q8，改广深为广州或深圳，复制、删除、撤销、新增并切题。",
+      "expected": "时间口径不重复；稳定题目id和焦点正确；切题不丢草稿。",
+      "taskIds": [
+        "A-F06",
+        "B-F06"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC09",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "问卷校验与反馈签名",
+      "steps": "保存空题、重复选项；再对已反馈问卷改一个选项。",
+      "expected": "无效题阻止确认；改题后旧反馈不能用于新版本。",
+      "taskIds": [
+        "A-F02",
+        "A-F06",
+        "B-F02",
+        "B-F06"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC10",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "资格终止与真实样本隔离",
+      "steps": "固定案例预览拒绝参与；普通自定义项目做同样预览。",
+      "expected": "固定案例按其规则终止；普通项目不被套上观演资格；预览答案不进入调查样本。",
+      "taskIds": [
+        "A-F06",
+        "B-F06"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC11",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "含漏答的样例分母",
+      "steps": "明确载入10条虚构样例，再排除r09。",
+      "expected": "默认5/8=62.5%；排除后4/7=57.1%；范围外与漏答说明及行ID相符。",
+      "taskIds": [
+        "A-F07",
+        "B-F07"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC12",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "图、数、说明与原始行同源",
+      "steps": "观演票价指标使用全部20条阈值4，再改前8条阈值5。",
+      "expected": "依次15/20=75%、2/8=25%；图、说明、范围和命中行同步。",
+      "taskIds": [
+        "A-F07",
+        "B-F07"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC13",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "满意度编码",
+      "steps": "对满意度原码1与5做方向核对。",
+      "expected": "展示原码并按6减原码统一评分，不反转其他题或合成无依据总分。",
+      "taskIds": [
+        "A-F07",
+        "B-F07"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC14",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "探索与采用不混淆",
+      "steps": "保留已采用参数，探索新阈值，随后显式采用。",
+      "expected": "探索不改旧报告；采用后标记受影响报告需核对，显式刷新只改对应观察段。",
+      "taskIds": [
+        "A-F07",
+        "A-F08",
+        "B-F07",
+        "B-F08"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC15",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "准确选区和过期修订",
+      "steps": "正文中有两处相同短句，只选第二处修订；再先改正文后尝试接受旧提议。",
+      "expected": "只改准确范围；旧baseSignature不匹配时拒绝，不误改第一处或整篇。",
+      "taskIds": [
+        "A-F08",
+        "B-F08"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC16",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "来源返回保留编辑",
+      "steps": "在报告输入未保存句，查看采用图表和原始行，再返回。",
+      "expected": "回到原草稿、选区/滚动位置；查看来源不隐式保存或覆盖。",
+      "taskIds": [
+        "A-F08",
+        "B-F08"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC17",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "运行事件隔离与取消",
+      "steps": "运行A后切项目/改输入/开始B，再送迟到A事件、重复sequence和A取消。",
+      "expected": "身份、指纹和sequence校验拦住旧事件；A不能覆盖或取消B；切项目演示取消明确。",
+      "taskIds": [
+        "A-F07",
+        "B-F07"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC18",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "双标签冲突与存储失败",
+      "steps": "两标签从同revision保存；注入配额失败。",
+      "expected": "事务仅接受一个旧revision；冲突保留草稿、提示最新/副本，不显示保存成功。",
+      "taskIds": [
+        "A-F03",
+        "B-F03"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC19",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "刷新与重开恢复",
+      "steps": "保存正文和未发送输入，刷新并在同一隔离配置退出重开。",
+      "expected": "项目、保存稿和应保留草稿恢复；不访问或清空作者日常浏览器。",
+      "taskIds": [
+        "A-F03",
+        "A-F10",
+        "B-F03",
+        "B-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC20",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "旧备份结构与引用重绑",
+      "steps": "导入合成的旧JSON，含多个历史版本、消息与任务；另试损坏JSON和未知版本。",
+      "expected": "新projectId与内部引用一致；历史正文/时间保留；非法文件无部分写入。",
+      "taskIds": [
+        "A-F03",
+        "B-F03"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC21",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "附件原件与缺项",
+      "steps": "保管一个虚构文件并取回；只用JSON在新项目恢复。",
+      "expected": "取回哈希一致；恢复明确缺原件；文件名不冒充Blob，限制与项目隔离生效。",
+      "taskIds": [
+        "A-F03",
+        "B-F03"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC22",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "导出指定保存版本",
+      "steps": "保存报告，再输入未保存句；分别导出当前保存稿和指定历史ref。",
+      "expected": "文件包含对应保存版，未保存句不进入阅读稿；备份可含草稿但不含原件。",
+      "taskIds": [
+        "A-F08",
+        "B-F08"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC23",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "固定原件和材料包",
+      "steps": "修改报告后下载固定Office原件，打包材料并检查缺项/超限。",
+      "expected": "固定原件独立且不伪称改稿已生成；ZIP完整，80MB上限与缺失提示正确。",
+      "taskIds": [
+        "A-F08",
+        "B-F08"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC24",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "任务与指导意见",
+      "steps": "建立带前置任务的安排，登记指导原话及不采纳理由，再备份恢复。",
+      "expected": "依赖与处理理由受检；原话和sourceRef保留；不声称已通知成员。",
+      "taskIds": [
+        "A-F09",
+        "B-F09"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC25",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "不安全文本与代码边界",
+      "steps": "载入含脚本/危险URL的合成文本，预览HTML或代码内容。",
+      "expected": "不在主页面执行；Markdown原始HTML默认禁用，外链协议受限；没有任意代码运行入口。",
+      "taskIds": [
+        "A-F04",
+        "A-F08",
+        "B-F04",
+        "B-F08"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC26",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "真实服务不可用",
+      "steps": "将运行模式明确设为remote但不配置可用服务；Gateway契约桩发失败事件或缺少成功终态。",
+      "expected": "显示不可用或失败，不展示预置成功替代、不采用历史结果；真实HTTP/SSE协议检查属于后续服务联调。",
+      "taskIds": [
+        "A-F01",
+        "A-F07",
+        "B-F01",
+        "B-F07"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC27",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "桌面可达性和缩放",
+      "steps": "检查1280×720、1440×900、1920×1080，补200%缩放和键盘导航。",
+      "expected": "输入、正文、保存、确认和菜单可达；可调整布局，整页不出现无意义横向溢出；不宣称完整无障碍合规。",
+      "taskIds": [
+        "A-F05",
+        "A-F10",
+        "B-F05",
+        "B-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "AC28",
+      "options": [
+        "A",
+        "B"
+      ],
+      "requirement": "独立构建与源基线",
+      "steps": "从新仓库冻结锁恢复并构建，核对源指纹与归档标签。",
+      "expected": "运行不读取D盘原项目；归档/scdc/旧浏览器数据不变；报告对应实际commit与交付入口。",
+      "taskIds": [
+        "A-F01",
+        "A-F10",
+        "B-F01",
+        "B-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "A01",
+      "options": [
+        "A"
+      ],
+      "requirement": "顶部阶段导航",
+      "steps": "从顶部进入已达、未达阶段及历史阶段。",
+      "expected": "未达阶段阻止；历史只读；恢复编辑必须明确；长阶段名可读。",
+      "taskIds": [
+        "A-F05",
+        "A-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "A02",
+      "options": [
+        "A"
+      ],
+      "requirement": "右侧确认上下文",
+      "steps": "打开确认后改上游或切项目，再尝试提交旧确认。",
+      "expected": "projectId/stage/baseRevision/inputSignature不匹配时拒绝；旧卡无有效提交。",
+      "taskIds": [
+        "A-F05",
+        "A-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "A03",
+      "options": [
+        "A"
+      ],
+      "requirement": "右栏页签与草稿",
+      "steps": "问卷输入后在待确认/成果/过程间切换，再开历史成果。",
+      "expected": "草稿和固定引用不丢；切页签不保存、不采用、不推进。",
+      "taskIds": [
+        "A-F05",
+        "A-F06",
+        "A-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "A04",
+      "options": [
+        "A"
+      ],
+      "requirement": "右侧长编辑与确认可达",
+      "steps": "1280×720编辑29题和长报告，进入专注编辑后返回并确认。",
+      "expected": "正文、保存和确认可达；专注往返不丢草稿，外壳不裁掉操作。",
+      "taskIds": [
+        "A-F05",
+        "A-F06",
+        "A-F08",
+        "A-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "B01",
+      "options": [
+        "B"
+      ],
+      "requirement": "三栏高度与编辑可达",
+      "steps": "1280×720打开长问卷、报告及输入区。",
+      "expected": "项目/阶段、中间对话和右侧成果职责清楚，站点顶栏不重复占用固定高度。",
+      "taskIds": [
+        "B-F05",
+        "B-F06",
+        "B-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "B02",
+      "options": [
+        "B"
+      ],
+      "requirement": "左栏阶段回看",
+      "steps": "点旧阶段与历史成果，再明确恢复编辑。",
+      "expected": "只读回看不改变业务阶段；恢复才执行必要失效。",
+      "taskIds": [
+        "B-F05",
+        "B-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "B03",
+      "options": [
+        "B"
+      ],
+      "requirement": "专注、收起与自动预览",
+      "steps": "进入专注对话/编辑，收起成果，接收新演示成果，回看历史。",
+      "expected": "普通回复不强行展开；有草稿或历史焦点时不抢预览；恢复布局不丢状态。",
+      "taskIds": [
+        "B-F05",
+        "B-F06",
+        "B-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    },
+    {
+      "id": "B04",
+      "options": [
+        "B"
+      ],
+      "requirement": "站点与项目衔接",
+      "steps": "工作台返回站点、再从项目列表进入，期间保留未发送输入或存储失败提示。",
+      "expected": "返回同一项目；草稿保留；失败明确，不由离页静默清空。",
+      "taskIds": [
+        "B-F05",
+        "B-F10"
+      ],
+      "status": "planned",
+      "evidenceRequired": [
+        "input and executed steps",
+        "actual result",
+        "relevant screenshot, downloaded file or test log"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,312 @@
+{
+  "date": "2026-10-19",
+  "status": "documentation-source-snapshot",
+  "productCodeImplemented": false,
+  "archive": {
+    "repository": "Mgy-d/jujue-naobu-prototype-archive",
+    "commit": "c21c179dff759e65ccb3b2b044c687885794b779",
+    "tag": "prototype-baseline-2026-10-19",
+    "files": [
+      {
+        "path": "prototype-b-v01/src/workflow.js",
+        "bytes": 3321,
+        "sha256": "28544b864be9453e7981ea7ec387085dda9648a646104fe6326c828a670084dd"
+      },
+      {
+        "path": "prototype-b-v01/src/experience.js",
+        "bytes": 15508,
+        "sha256": "1b5e1b9ce3d2b648208c272739390383b92ecbb66867bfa8997937c2e89f3ac4"
+      },
+      {
+        "path": "prototype-b-v01/src/questionnaire.js",
+        "bytes": 1353,
+        "sha256": "c1c55894cf19562f568890f004b10eede4bfb8add74d0e8acf064b85daa2e3a5"
+      },
+      {
+        "path": "prototype-b-v01/src/project-records.js",
+        "bytes": 7403,
+        "sha256": "daaf0f058d6a81864b1264229d4a6d9363cc29556272bf69e71a78d3455333e6"
+      },
+      {
+        "path": "prototype-b-v01/src/storage-guard.js",
+        "bytes": 581,
+        "sha256": "7893c0917900d52381c737933ddc8d4e981797f343ec3b8cb2280fc0ad765c6e"
+      },
+      {
+        "path": "prototype-b-v01/src/prototype-study.js",
+        "bytes": 13607,
+        "sha256": "f615c8d9c2784b3686d995502876a67a3aef0d2e6253f165665b9cabe616e3d4"
+      },
+      {
+        "path": "prototype-b-v01/src/prototype-presentation.js",
+        "bytes": 3952,
+        "sha256": "dc592c3011ab0c357d45c925a28d360390c9cdd0714a34c03185138ba17922cc"
+      },
+      {
+        "path": "prototype-b-v01/src/research-desk.js",
+        "bytes": 6024,
+        "sha256": "1fcade91299fe1b7d3571dfb109f20d91bc4867ca0c141ca5938b8aa57c5aab9"
+      },
+      {
+        "path": "prototype-b-v01/src/guided-studio.js",
+        "bytes": 5016,
+        "sha256": "33696ea086cbb22907f093b0e1d646ff4e777d02cc202113e5f1ab7b08441bee"
+      },
+      {
+        "path": "prototype-b-v01/src/app.js",
+        "bytes": 191059,
+        "sha256": "146029f69291cb3962c12d941fb409b9f59945981b64df67392e1a431ad1ec31"
+      },
+      {
+        "path": "prototype-b-v01/src/ui/entry.tsx",
+        "bytes": 20015,
+        "sha256": "f2dd776613c168cef2b41dbf665f78c0b8994d8ec178914d38f3e7af02aedf23"
+      },
+      {
+        "path": "prototype-b-v01/src/award-works.js",
+        "bytes": 11299,
+        "sha256": "053fe3a74740c3bfe73ed82288369234912222e3fd844bc9ebf77005f56ec844"
+      },
+      {
+        "path": "prototype-b-v01/src/library-view.js",
+        "bytes": 2877,
+        "sha256": "9bdd4f552af09bca5b11651129af4f07405e076414b63e1edd8ba8096191b6e2"
+      },
+      {
+        "path": "prototype-b-v01/src/process-visual.js",
+        "bytes": 9445,
+        "sha256": "cf6b976971421b6e553e65a13e87f223f80ef1977f488c26573a36a6286a2746"
+      },
+      {
+        "path": "prototype-b-v01/src/research-tools.js",
+        "bytes": 10149,
+        "sha256": "76c63fad8d781272dcc3cedad9b374c805c00c67cce7b5f96d943306278f4742"
+      },
+      {
+        "path": "prototype-b-v01/assets/reference-palette.json",
+        "bytes": 887,
+        "sha256": "0ea08c9bc92c1066bb3671fb09fed69a42743863ac51f4967a457d08b73a5580"
+      },
+      {
+        "path": "prototype-b-v01/assets/study-case/case.json",
+        "bytes": 73797,
+        "sha256": "1c481c56a12387ad1dce209b9bf021018de8c3baf9b19bcbbe84194c314bd415"
+      },
+      {
+        "path": "prototype-b-v01/scripts/workflow.test.mjs",
+        "bytes": 1265,
+        "sha256": "acd79e3f1cee4b32bd0bd0c064cb5183d1fed678f0b4869dede0df5f09afd7a9"
+      },
+      {
+        "path": "prototype-b-v01/scripts/experience.test.mjs",
+        "bytes": 8951,
+        "sha256": "f98dd861495fc64130908e2498734a99fffc17984a6bb9bf1a2b589f0775ad9d"
+      },
+      {
+        "path": "prototype-b-v01/DESIGN.md",
+        "bytes": 38716,
+        "sha256": "2c397ef3e4701e6abb7221ee23d3a2d8e047ac5aa157531fe63cae2cf60731e1"
+      },
+      {
+        "path": "prototype-b-v01/PRODUCT.md",
+        "bytes": 22341,
+        "sha256": "2f5610def5b903e605f343b387a0a13ab0b0a7595b8ee159317ae6ff9dbd4aed"
+      },
+      {
+        "path": "prototype-b-v01/src/conversation.js",
+        "bytes": 2240,
+        "sha256": "769f98b7a5ab79f8f9e7fdb70819e598be449469d479a30f378b6f47add5adba"
+      }
+    ]
+  },
+  "shellReference": {
+    "localPath": "D:/scdc-develop",
+    "gitMetadataPresent": false,
+    "files": [
+      {
+        "path": "package.json",
+        "bytes": 768,
+        "sha256": "e2cdaae54e91457f601a0f78397b3238a3ba7fc341589f359322481893de2af9"
+      },
+      {
+        "path": "pnpm-lock.yaml",
+        "bytes": 45988,
+        "sha256": "5596ae1e27b431bf0d4bda5429d776226858c4a65f6a35cf281492dbf5e802ec"
+      },
+      {
+        "path": "vite.config.ts",
+        "bytes": 1607,
+        "sha256": "e11b7b4803261133f8e7bd97349ec1b028286f84aa82200990ebf614010529a2"
+      },
+      {
+        "path": "tsconfig.json",
+        "bytes": 678,
+        "sha256": "39b4252ab4c742e2de1012e6003c140febdad54156d203236da4507ed72b73e8"
+      },
+      {
+        "path": "CONTRIBUTING.md",
+        "bytes": 5624,
+        "sha256": "a1558f22f22aabc229293cb853d994e13709e1f3fb0a162dfa19b4a716b1965d"
+      },
+      {
+        "path": "README.md",
+        "bytes": 29729,
+        "sha256": "dfcf524d65a6c313533e202264a3482baa969e894a4c7e6ed2209a0bb8caa43d"
+      },
+      {
+        "path": "src/views/PrototypeShell.vue",
+        "bytes": 41698,
+        "sha256": "49d3602af59fdee46a59d7500b769426405ce088bdec9ffaff0be53bef021628"
+      },
+      {
+        "path": "src/views/WorkbenchView.vue",
+        "bytes": 10833,
+        "sha256": "db90acba05289f8362e0ecc073ed2921385e2e8add759898e785cbbf6154ff94"
+      },
+      {
+        "path": "src/views/FileEditorView.vue",
+        "bytes": 17798,
+        "sha256": "9d60ed5fd8d7230d130a7b114d1c9b032bd66dfb23d7fefb8861ce877308d0a0"
+      },
+      {
+        "path": "src/router/index.ts",
+        "bytes": 4233,
+        "sha256": "ddc7eff36dec1e5fb14553cf9e09652355ad51a4f1f239d1efe0a05221e9de61"
+      },
+      {
+        "path": "src/styles/tokens.scss",
+        "bytes": 1173,
+        "sha256": "dc3c3189189a73d1d833b17143e3f0bafa9747870181f40c97734bb6548c6f04"
+      },
+      {
+        "path": "src/styles/prototype.scss",
+        "bytes": 70399,
+        "sha256": "974d7a9f24f6e5ac96375db63749e895743e4508dc528d5944db07c94bece10e"
+      },
+      {
+        "path": "src/legacy/prototype/core.ts",
+        "bytes": 286385,
+        "sha256": "3b2349b9605b82f03c719c2444b7c3b544e1ceb0bc2b430a98ae785533483c7b"
+      },
+      {
+        "path": "src/legacy/prototype/hooks.ts",
+        "bytes": 24297,
+        "sha256": "49032264781c777961f001b115da2605fd386583df16819818ff0ec9fec50a6e"
+      },
+      {
+        "path": "src/legacy/bridge/analysisHooks.ts",
+        "bytes": 2803,
+        "sha256": "c469347138ce4cb4830387c3f77513ea7ae8da7e04644fba4aff5ea4d8044b83"
+      },
+      {
+        "path": "src/api/agui.ts",
+        "bytes": 5589,
+        "sha256": "58b71481777ae6b1ed4c93b88c8830ceac37e490c7592c483f148b86c9a49d0a"
+      },
+      {
+        "path": "src/api/http.ts",
+        "bytes": 12200,
+        "sha256": "6c5475951b20088d59bc277fa659872e30b5811d316cdd9f9037499b551288ac"
+      },
+      {
+        "path": "src/api/session.ts",
+        "bytes": 10388,
+        "sha256": "7aebb040519d9eee45487b15e01fd86f476daf4674ca5bccc731860cb38fac38"
+      },
+      {
+        "path": "src/api/attachment.ts",
+        "bytes": 4605,
+        "sha256": "97a145b4b6d4a4ee8eda655630aecbe83679292dabe4362a5fc972b835b73e22"
+      },
+      {
+        "path": "src/api/artifact.ts",
+        "bytes": 2897,
+        "sha256": "5244cb53b3403a17f7236b0edbc988e9cc25279a077dec22633d541c25f11f55"
+      },
+      {
+        "path": "src/api/workbenchStore.ts",
+        "bytes": 4295,
+        "sha256": "d83ec3e9bd726ce5e4b7acc598712af4efae702f5519df096ac09f1a409e13cf"
+      },
+      {
+        "path": "src/engine/localRunner.ts",
+        "bytes": 11280,
+        "sha256": "6f34e2ba5e857fc5f29e47bf249eb190a8cae7c5fd51b918c44fb39a51e079ca"
+      },
+      {
+        "path": "src/stores/problemSession.ts",
+        "bytes": 4576,
+        "sha256": "815d62dacc5e99f5b604b28192b9fbcef8bea55bbeef6a3ab1840bfe84d21463"
+      },
+      {
+        "path": "src/stores/analysis.ts",
+        "bytes": 108603,
+        "sha256": "308bb350e12dc05a1dfd646f7385658bcf8f8fffca296d200469671df4adcbf5"
+      },
+      {
+        "path": "src/stores/sandbox.ts",
+        "bytes": 38555,
+        "sha256": "1f1658478b25ab22c170f58d6e513fba567eabb28b8470032e09f2c8bfa6100a"
+      },
+      {
+        "path": "scripts/port/build-port.mjs",
+        "bytes": 255105,
+        "sha256": "41046a53199e2ed6500dc5fb7ba859c1170bff59ef3c389a7b0a8e0c9020be70"
+      }
+    ],
+    "sourceCodeIncludedInThisSnapshot": false,
+    "scope": "Reference file fingerprints only; original code remains in its local directory."
+  },
+  "verifiedFixtureFacts": {
+    "questionCount": 29,
+    "simulatedRowCount": 20,
+    "priceBarrierObservations": [
+      {
+        "field": "Q11_阻碍_票价超预算",
+        "limit": 20,
+        "threshold": 4,
+        "selected": 15,
+        "valid": 20,
+        "percent": 75.0
+      },
+      {
+        "field": "Q11_阻碍_票价超预算",
+        "limit": 8,
+        "threshold": 5,
+        "selected": 2,
+        "valid": 8,
+        "percent": 25.0
+      }
+    ],
+    "independentSampleObservations": {
+      "before": {
+        "selected": 5,
+        "valid": 8,
+        "percent": 62.5
+      },
+      "excludeR09": {
+        "selected": 4,
+        "valid": 7,
+        "percent": 57.1
+      },
+      "method": "Called studyResult and decideSampleRow from the archived source module; not a test of the new frontend."
+    }
+  },
+  "sourceLockedVersions": {
+    "vue": "3.5.43",
+    "vue-router": "4.6.4",
+    "pinia": "2.3.1",
+    "element-plus": "2.14.6",
+    "vite": "5.4.2",
+    "typescript": "5.5.2",
+    "note": "Read from scdc pnpm-lock.yaml; provenance facts, not the new-project dependency decision."
+  },
+  "evidenceBoundary": {
+    "sourceRead": true,
+    "fixtureArithmeticRecomputed": true,
+    "scdcBrowserRunThisRound": false,
+    "productBuildThisRound": false,
+    "productTestsRunThisRound": false,
+    "realUserStudy": false
+  }
+}
