@@ -123,6 +123,8 @@ export function checkContestDraft(draft: CompetitionDraft): string[] {
         issues.push('尚未记录适用要求。');
     const sourceIds = new Set(draft.sources.filter(s => s.title.trim() && s.locator.trim()).map(s => s.sourceId));
     for (const r of draft.requirements) {
+        if (!r.text.trim())
+            issues.push('有要求正文为空，请填写或删除该条要求。');
         if (!r.sourceIds.length || r.sourceIds.some(id => !sourceIds.has(id)))
             issues.push('要求“' + r.text + '”缺少可定位来源。');
     }

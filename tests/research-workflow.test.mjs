@@ -104,3 +104,10 @@ test('background registration does not change the user selected task',async()=>{
  assert.equal(registry.lastByKind['dataset-analysis'],'B')
  assert.equal(registry.tasks.A.sandboxRef.runId,'late-A')
 })
+
+test('local contest completeness catches an empty extra requirement with a valid source',async()=>{
+ const m=await subject(),draft=m.syntheticContestDraft()
+ draft.edition='synthetic edition';draft.group='synthetic group';draft.unknowns=[]
+ draft.requirements.push({id:'empty-extra',text:' ',sourceIds:[draft.sources[0].sourceId]})
+ assert.ok(m.checkContestDraft(draft).some(issue=>issue.includes('正文为空')))
+})

@@ -23,7 +23,7 @@
 
 ## 向 F 交接
 
-接入位置：`src/components/research/ResearchDesignEditor.vue`。本轮未创建该文件，也未替 F 重写编辑器。
+接入位置：`src/components/research/ResearchDesignEditor.vue`。2026-10-26 已从用户交付包接入 F 原始文件，未重写编辑器、未新增依赖。集成验证见 `verification/contest-component-integration.md`。
 
 - props：`context: {localTaskId, revision}`、`draft: CompetitionDraft`、`readOnly: boolean`、`issues: string[]`。
 - emit `update-draft: {context, draft}`；完整 draft 结构见公共类型。保留来源 ID、原文 locator 和 evidenceStatus；不可根据文件名标已读或核实。
@@ -48,6 +48,6 @@ R1/S01 应返回可追溯要求、来源及未知项；当前 G0 本机提示不
 
 ## 验证边界与下一步
 
-本轮自动测试及浏览器记录分别覆盖草稿/阶段接线与合成 HTTP 响应。真实正式项目保存、阶段确认/锁定和 F 正式编辑组件仍未通过。运行记录与截图放 `D:/Codex/workspace/市场调研大赛/outputs/full-study-20261024`，不进入源代码仓库。
+本轮自动测试及浏览器记录分别覆盖草稿/阶段接线与合成 HTTP 响应。F 正式组件已完成本机填写、保存、刷新、任务切换与失败保稿验收；真实正式项目保存、阶段确认/锁定仍未通过。运行记录与截图放 `D:/Codex/workspace/市场调研大赛/outputs/full-study-20261024`，不进入源代码仓库。
 
-继续原任务：先接 F 第一阶段组件和 BA 真实接口，再验收人工编辑→本机保稿→候选保存→固定版本读回→正式完成检查→用户确认→同事务推进。等待交付时可依同一公共协议准备第二阶段挂载，不把后续范围预览标为功能完成。
+第一阶段本机填写链已通过；接续任务为消费 BA 真实接口，验收候选保存→固定版本读回→正式完成检查→用户确认→同事务推进。等待交付时可依同一公共协议准备第二阶段挂载，不把后续范围预览标为功能完成。
