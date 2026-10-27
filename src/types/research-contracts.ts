@@ -46,6 +46,50 @@ export interface CompetitionDraft {
     sources: ContestSource[];
     unknowns: ContestUnknown[];
 }
+/** Local integration schema; align with F/BA delivery before formal persistence. */
+export interface TopicCandidate {
+    id: string;
+    title: string;
+    researchQuestion: string;
+    targetPopulation: string;
+    feasibility: string;
+    sourceIds: string[];
+}
+export interface TopicAnalysisDraft {
+    candidates: TopicCandidate[];
+    selectedCandidateId: string | null;
+    selectionReason: string;
+    sources: ContestSource[];
+    unknowns: ContestUnknown[];
+}
+export interface ResearchPlanDraft {
+    researchQuestion: string;
+    targetPopulation: string;
+    samplingPlan: string;
+    recruitmentPlan: string;
+    measurementPlan: string;
+    evidenceNeeds: string;
+    analysisPlan: string;
+    sources: ContestSource[];
+    unknowns: ContestUnknown[];
+}
+export type ResearchStageDraftUpdate =
+    | { phase: 1; context: DraftContext; draft: TopicAnalysisDraft }
+    | { phase: 2; context: DraftContext; draft: ResearchPlanDraft };
+export interface ResearchPlanEditorProps {
+    context: DraftContext;
+    draft: ResearchPlanDraft;
+    readOnly: boolean;
+    issues: string[];
+    upstream: { competition: CompetitionDraft; topicAnalysis: TopicAnalysisDraft };
+}
+export interface TopicAnalysisEditorProps {
+    context: DraftContext;
+    draft: TopicAnalysisDraft;
+    readOnly: boolean;
+    issues: string[];
+    upstream: { competition: CompetitionDraft };
+}
 export interface SelectedInputMetadata {
     name: string;
     size: number;
@@ -68,6 +112,8 @@ export interface LocalResearchTask {
     inputFile: SelectedInputMetadata | null;
     sandboxRef: SandboxReference | null;
     competition: CompetitionDraft;
+    topicAnalysis: TopicAnalysisDraft;
+    researchPlan: ResearchPlanDraft;
 }
 export interface ResearchFailure {
     code: 'CAPABILITY_UNAVAILABLE' | 'PERSIST_FAILED' | 'STALE_BASELINE' | 'PHASE_LOCKED' | 'UNAUTHORIZED' | 'MISSING_INPUT';
