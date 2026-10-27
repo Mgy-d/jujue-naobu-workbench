@@ -1,40 +1,115 @@
 <template>
   <main class="research-home">
     <header class="nav"><div class="nav-inner">
-      <RouterLink class="brand" to="/"><span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 19V6M4 19h16M8 19v-6M12 19V9M16 19v-8M20 19v-4" /></svg></span><span class="brand-txt"><strong>市调演真</strong><small>Survey Research Studio</small></span></RouterLink>
-      <nav class="nav-links" aria-label="主导航"><RouterLink class="on" to="/">首页</RouterLink><RouterLink to="/research/work?mode=full">研究工作台</RouterLink><RouterLink to="/research/work?mode=full">继续本机研究</RouterLink></nav>
+      <RouterLink class="brand" to="/"><span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 19V6M4 19h16M8 19v-6M12 19V9M16 19v-8M20 19v-4" /></svg></span><span class="brand-txt"><strong class="brand-name">市调演真</strong><small class="brand-sub">Survey Research Studio</small></span></RouterLink>
+      <nav class="nav-links" aria-label="主导航"><RouterLink class="on" to="/">首页</RouterLink><RouterLink to="/research/work?mode=full">研究工作台</RouterLink><RouterLink to="/research/work?mode=full">本机草稿</RouterLink></nav>
       <div class="nav-right"><span v-if="userStore.isLogged">{{userStore.displayName}}</span><RouterLink v-else class="btn-login" to="/login">登录 / 注册</RouterLink><button v-if="userStore.isLogged" class="btn-ghost" @click="userStore.logout()">退出</button></div>
     </div></header>
-    <!-- Reuse the reference homepage composition, without its modeling boot/case actions. -->
     <section class="hero"><div class="hero-inner">
-      <div class="hero-badge"><i aria-hidden="true"></i>市场调查研究工作台</div>
-      <h1>让调查材料，成为<span class="gradient-text">有据可查的结论</span></h1>
+      <div class="hero-badge"><i class="dot" aria-hidden="true"></i>市场调查研究工作台</div>
+      <h1>让调查材料，成为<span class="g">有据可查的结论</span></h1>
       <p class="sub">从赛事理解、选题到研究方案，在同一份任务中逐步推进。保留来源和未知项，让每一步研究都有据可查。</p>
-      <section class="hero-reco" aria-labelledby="research-works-title">
-        <div class="sec-head"><h2 id="research-works-title">研究作品</h2><span>轮播展示区预留 · 真实作品后续接入</span></div>
-        <div class="reco-grid" aria-label="作品展示占位">
-          <article v-for="index in 3" :key="index" class="stage-card work-placeholder">
-            <div class="placeholder-cover" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M29 7H14a3 3 0 0 0-3 3v28a3 3 0 0 0 3 3h20a3 3 0 0 0 3-3V15z"/><path d="M29 7v8h8M18 23h12M18 29h12M18 35h7"/></svg><span>作品封面预留</span></div>
-            <div class="placeholder-copy"><span class="placeholder-label">待接入</span><h3>作品展示位 {{ index }}</h3><p>真实研究作品接入后，在这里展示。</p></div>
-          </article>
+      <section class="hero-reco" aria-labelledby="research-works-title" aria-roledescription="轮播" @mouseenter="carouselHovered=true" @mouseleave="carouselHovered=false" @focusin="carouselFocused=true" @focusout="onCarouselFocusOut" @keydown="onCarouselKey">
+        <div class="sec-head"><h2 id="research-works-title">研究作品</h2><span class="sub">卡片占位展示 · 真实作品后续接入</span><div class="grow"></div><div class="sec-acts">
+          <button type="button" class="btn-ghost rotation-control" :aria-label="rotationEnabled?'暂停自动轮播':'开启自动轮播'" @click="rotationEnabled=!rotationEnabled">{{rotationEnabled?'暂停轮播':'继续轮播'}}</button>
+          <button type="button" class="icon-btn" aria-label="上一张作品" aria-controls="research-work-track" :disabled="transitioning" @click="moveCarousel(-1)"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m14 6-6 6 6 6" /></svg></button>
+          <button type="button" class="icon-btn" aria-label="下一张作品" aria-controls="research-work-track" :disabled="transitioning" @click="moveCarousel(1)"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m10 6 6 6-6 6" /></svg></button>
+        </div></div>
+        <div ref="carouselViewport" class="car-view" tabindex="0" aria-label="作品占位卡片，可拖动或使用左右方向键切换" @pointerdown="startDrag" @pointermove="dragCarousel" @pointerup="finishDrag" @pointercancel="cancelDrag">
+          <div id="research-work-track" class="car-track" :class="{ 'no-motion':!animateTrack,grabbing:dragging }" :style="{transform:`translateX(${-((cloneCount+physicalIndex)*CARD_STEP)+dragOffset}px)`}" @transitionend="onTrackTransitionEnd">
+            <article v-for="(item,position) in renderedCards" :key="item.key" class="pcard work-placeholder" :data-work="item.slot" :aria-hidden="!cardVisible(position)" :inert="!cardVisible(position)">
+              <div class="cover" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H6v18h12V7zM14 3v5h4M9 12h6M9 16h5" /></svg><span class="cover-label">作品封面预留</span></div>
+              <span class="ptag">作品占位</span><h3>研究作品展示位 {{item.slot}}</h3><p>这里预留作品的题目、简介与研究成果，真实内容接入后展示。</p>
+              <div class="pfoot"><span>真实作品待接入</span><span class="go">详情待开放</span></div>
+            </article>
+          </div>
         </div>
+        <div class="carousel-footer"><div class="car-dots" aria-label="选择作品位置"><button v-for="(_,index) in placeholderWorks" :key="index" type="button" :class="{on:activeIndex===index}" :aria-label="'切换到作品位置 '+(index+1)" :aria-current="activeIndex===index?'true':undefined" :disabled="transitioning" @click="goToCard(index)"><span aria-hidden="true"></span></button></div><span class="carousel-counter" role="status" :aria-live="rotationRunning?'off':'polite'">{{activeIndex+1}} / {{placeholderWorks.length}}</span></div>
       </section>
-      <form class="composer big" @submit.prevent="startResearch"><label for="research-home-prompt">研究任务与背景</label><textarea id="research-home-prompt" v-model="researchPrompt" rows="3" maxlength="12000" placeholder="写下你想调查的问题、赛事背景或当前已有的材料；也可以留空，进入工作台后再填写。"></textarea><div class="cbar"><span class="hint">创建完整研究任务，材料在工作台按阶段整理。</span><button class="btn-send" type="submit">开始完整研究 <span aria-hidden="true">→</span></button></div></form>
+      <form class="composer big" @submit.prevent="startResearch"><label class="sr-only" for="research-home-prompt">研究任务与背景</label><textarea id="research-home-prompt" v-model="researchPrompt" rows="2" maxlength="12000" placeholder="输入研究问题或赛事背景，进入工作台后继续整理材料……"></textarea><div class="cbar">
+        <button type="button" class="btn-ghost" disabled title="材料上传功能待接入"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H6v18h12V7zM14 3v5h4M9 12h6M9 16h5" /></svg>上传材料</button>
+        <RouterLink class="btn-ghost" to="/research/work?mode=analysis" title="进入已有答卷分析并上传数据"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 15v6h16v-6M12 16V3M7 8l5-5 5 5" /></svg>导入答卷</RouterLink>
+        <span class="hint">填写背景后开始研究；材料上传待接入</span><div class="spacer"></div><button class="btn-send" type="submit">开始完整研究<svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
+      </div></form>
       <p v-if="researchStore.storageError" class="home-error" role="alert">{{researchStore.storageError}}</p>
       <div class="chips" aria-label="独立快捷入口"><RouterLink class="chip" to="/research/work?mode=full">继续完整研究 →</RouterLink><RouterLink class="chip" to="/research/work?mode=questionnaire">已有问卷核对 →</RouterLink><RouterLink class="chip" to="/research/work?mode=analysis">已有答卷／数据分析 →</RouterLink></div>
     </div></section>
-    <section class="section" aria-labelledby="research-journey-title"><div class="sec-head"><h2 id="research-journey-title">一份任务，贯穿完整研究</h2><span>已接入与待接入分别呈现</span></div><ol class="journey"><li v-for="(stage,index) in journey" :key="stage.title"><span class="journey-no">{{index+1}}</span><div><h3>{{stage.title}}</h3><p>{{stage.description}}</p><small :class="{ready:index<4}">{{index<4?'可填写 · 本机保存':stage.status}}</small></div></li></ol><p class="scope-note">当前前四阶段支持本机编辑；已有答卷可从独立入口使用本机分析。后续阶段、真实 AI、服务器正式保存和阶段确认按实际交付接入，导航展示不代表整项研究已经完成。</p></section>
-    <footer class="foot"><div class="foot-in"><strong>市调演真 · Survey Research Studio</strong><span>市场调查研究工作台 · 保留依据，审阅后采用</span><RouterLink to="/research/work?mode=full">进入研究工作台 →</RouterLink></div></footer>
+    <section class="section" aria-labelledby="all-works-title"><div class="sec-head"><h2 id="all-works-title">全部作品</h2><span class="sub">展示位置预留 · 真实作品接入后开放筛选与查看</span></div>
+      <div class="filters" aria-label="作品筛选占位"><div class="frow"><span class="lbl">研究入口</span><div class="opts"><button v-for="label in ['全部','完整研究','已有问卷','已有答卷']" :key="label" type="button" class="chip" :class="{on:label==='全部'}" disabled>{{label}}</button></div></div><div class="frow"><span class="lbl">研究方式</span><div class="opts"><button v-for="label in ['全部','问卷调查','访谈研究','已有数据分析']" :key="label" type="button" class="chip" :class="{on:label==='全部'}" disabled>{{label}}</button></div></div><div class="frow"><span class="lbl">作品年份</span><div class="opts"><button type="button" class="chip on" disabled>全部</button><span class="filter-note">作品资料待接入</span></div></div></div>
+      <div class="grid"><article v-for="index in placeholderWorks" :key="index" class="gcard work-catalog-card"><div class="top"><span class="tag-c">作品占位</span><span class="mtag">待接入</span></div><h4>研究作品展示位 {{index}}</h4><p>这里预留作品简介与研究成果，真实内容接入后展示。</p><div class="mtags"><span class="mtag">封面预留</span><span class="mtag">简介预留</span><span class="mtag">成果预留</span></div></article></div>
+      <p class="scope-note">作品卡片为占位展示。当前前四阶段支持本机填写和保存；真实 AI、正式保存与阶段确认仍待接入。</p>
+    </section>
+    <footer class="foot"><div class="foot-in"><strong>市调演真 · Survey Research Studio</strong><div class="grow"></div><span>面向市场调查的材料、分析与成果协作工作台</span></div></footer>
   </main>
 </template>
 <script setup lang="ts">
-import {ref} from 'vue'
+import {computed,nextTick,onMounted,onUnmounted,ref} from 'vue'
 import {useRouter} from 'vue-router'
 import {useUserStore} from '@/stores/user'
 import {useResearchStore} from '@/stores/research'
 const userStore=useUserStore(),researchStore=useResearchStore(),router=useRouter(),researchPrompt=ref('')
-const firstStages=[{title:'赛事理解',description:'整理背景、赛事要求与来源，记录仍需核对的未知项。'},{title:'选题分析',description:'比较候选方向，明确研究问题、调查对象与可行性。'},{title:'研究方案',description:'对齐抽样、招募、测量和分析安排，提前发现方案缺项。'}]
-const journey=[...firstStages.map(stage=>({...stage,status:''})),{title:'问卷设计与预测试',description:'设计题目，核对逻辑，记录真实试填与修订。',status:'可填写 · 本机保存'},{title:'正式调查',description:'平台内发布、匿名填写、回收与停止收集。',status:'待采集服务与部署'},{title:'数据分析',description:'质检数据，记录处理、统计与结果依据。',status:'已有答卷可独立分析；本流程待接入'},{title:'报告与答辩',description:'使用已采用的材料与结果，整理报告和交付。',status:'待接入'}]
+const placeholderWorks=Array.from({length:12},(_,index)=>index+1),CARD_STEP=312
+const carouselViewport=ref<HTMLElement|null>(null),viewportWidth=ref(1360),physicalIndex=ref(0),animateTrack=ref(false),transitioning=ref(false),dragOffset=ref(0),dragging=ref(false)
+const cloneCount=computed(()=>Math.min(placeholderWorks.length,Math.max(1,Math.ceil((viewportWidth.value+16)/CARD_STEP))))
+const activeIndex=computed(()=>((physicalIndex.value%placeholderWorks.length)+placeholderWorks.length)%placeholderWorks.length)
+const renderedCards=computed(()=>[
+  ...placeholderWorks.slice(-cloneCount.value).map(slot=>({slot,key:'before-'+slot})),
+  ...placeholderWorks.map(slot=>({slot,key:'main-'+slot})),
+  ...placeholderWorks.slice(0,cloneCount.value).map(slot=>({slot,key:'after-'+slot})),
+])
+const rotationEnabled=ref(true),carouselHovered=ref(false),carouselFocused=ref(false),pageHidden=ref(false)
+const rotationRunning=computed(()=>rotationEnabled.value&&!carouselHovered.value&&!carouselFocused.value&&!pageHidden.value&&!dragging.value)
+let carouselTimer:ReturnType<typeof setInterval>|undefined,transitionTimer:ReturnType<typeof setTimeout>|undefined
+let motionPreference:MediaQueryList|undefined,resizeObserver:ResizeObserver|undefined,frame=0,disposed=false,dragStartX=0,dragPointer:number|null=null
+function cardVisible(position:number){const start=cloneCount.value+physicalIndex.value;return position>=start&&position<start+cloneCount.value}
+function enableTrackAnimation(){cancelAnimationFrame(frame);void nextTick(()=>{if(disposed)return;frame=requestAnimationFrame(()=>{if(!disposed)animateTrack.value=true})})}
+function finishTransition(){
+  if(transitionTimer!==undefined)clearTimeout(transitionTimer)
+  transitionTimer=undefined
+  if(physicalIndex.value!==activeIndex.value){animateTrack.value=false;physicalIndex.value=activeIndex.value;enableTrackAnimation()}
+  transitioning.value=false
+}
+function onTrackTransitionEnd(event:TransitionEvent){if(event.target===event.currentTarget&&event.propertyName==='transform')finishTransition()}
+function moveTo(index:number){
+  if(transitioning.value||index===physicalIndex.value)return
+  if(motionPreference?.matches){animateTrack.value=false;physicalIndex.value=((index%placeholderWorks.length)+placeholderWorks.length)%placeholderWorks.length;return}
+  animateTrack.value=true;transitioning.value=true;physicalIndex.value=index
+  transitionTimer=setTimeout(finishTransition,720)
+}
+function moveCarousel(direction:number){moveTo(activeIndex.value+direction)}
+function goToCard(index:number){moveTo(index)}
+function onCarouselFocusOut(event:FocusEvent){carouselFocused.value=event.relatedTarget instanceof Node&&(event.currentTarget as HTMLElement).contains(event.relatedTarget)}
+function onCarouselKey(event:KeyboardEvent){if(event.altKey||event.ctrlKey||event.metaKey||!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();moveCarousel(event.key==='ArrowLeft'?-1:1)}
+function syncVisibility(){pageHidden.value=document.hidden}
+function syncMotion(){if(motionPreference?.matches){rotationEnabled.value=false;finishTransition()}}
+function measureCarousel(){
+  const width=carouselViewport.value?.clientWidth;if(!width)return
+  const current=activeIndex.value;animateTrack.value=false;finishTransition();physicalIndex.value=current;viewportWidth.value=width;dragOffset.value=0;enableTrackAnimation()
+}
+function startDrag(event:PointerEvent){
+  if(event.button!==0||transitioning.value)return
+  dragging.value=true;dragStartX=event.clientX;dragPointer=event.pointerId;dragOffset.value=0
+  carouselViewport.value?.setPointerCapture(event.pointerId)
+}
+function dragCarousel(event:PointerEvent){if(dragging.value&&event.pointerId===dragPointer)dragOffset.value=Math.max(-CARD_STEP,Math.min(CARD_STEP,event.clientX-dragStartX))}
+function cancelDrag(){dragging.value=false;dragOffset.value=0;dragPointer=null}
+function finishDrag(event:PointerEvent){
+  if(!dragging.value||event.pointerId!==dragPointer)return
+  const offset=dragOffset.value;if(carouselViewport.value?.hasPointerCapture(event.pointerId))carouselViewport.value.releasePointerCapture(event.pointerId)
+  cancelDrag();if(Math.abs(offset)>60)moveCarousel(offset<0?1:-1)
+}
+onMounted(()=>{
+  motionPreference=window.matchMedia('(prefers-reduced-motion: reduce)');syncMotion();syncVisibility()
+  motionPreference.addEventListener('change',syncMotion);document.addEventListener('visibilitychange',syncVisibility)
+  measureCarousel();resizeObserver=new ResizeObserver(measureCarousel);resizeObserver.observe(carouselViewport.value!)
+  carouselTimer=setInterval(()=>{if(rotationRunning.value&&!transitioning.value)moveCarousel(1)},3000)
+})
+onUnmounted(()=>{
+  disposed=true;cancelAnimationFrame(frame);resizeObserver?.disconnect()
+  if(carouselTimer!==undefined)clearInterval(carouselTimer)
+  if(transitionTimer!==undefined)clearTimeout(transitionTimer)
+  motionPreference?.removeEventListener('change',syncMotion);document.removeEventListener('visibilitychange',syncVisibility)
+})
 function startResearch(){
   const background=researchPrompt.value.trim(),task=researchStore.create('full-study')
   if(background)researchStore.update({title:background.split('\n')[0]!.slice(0,120),competition:{...task.competition,background}})
@@ -42,7 +117,4 @@ function startResearch(){
   void router.push({path:'/research/work',query:{mode:'full',task:task.localTaskId}})
 }
 </script>
-<style scoped>
-.research-home{--home-grad:linear-gradient(120deg,#12a594 0%,#1e9fc4 100%);min-height:100vh;background:#f3fafa;color:#0b2e36}.nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.95);backdrop-filter:blur(12px);border-bottom:1px solid #dcedee}.nav-inner{max-width:1680px;margin:auto;padding:0 40px;height:66px;display:flex;align-items:center;gap:32px}.brand{display:flex;align-items:center;gap:16px;text-decoration:none;color:inherit;flex-shrink:0}.brand-mark{width:32px;height:32px;border-radius:10px;background:var(--home-grad);display:grid;place-items:center;color:white;box-shadow:0 6px 16px #0b6e6847}.brand-txt{display:grid;line-height:1.2}.brand strong{font-size:19px;font-weight:800;letter-spacing:.5px;color:#0b6e68}.brand small{font-size:12px;color:#57727c;margin-top:2px}.nav-links{display:flex;gap:8px;margin-left:28px}.nav-links a{padding:7px 14px;border-radius:9px;color:#3d6570;font-size:15px;font-weight:600;text-decoration:none}.nav-links .on{background:#dff4f1;color:#0e8f84}.nav-right{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:14px}.btn-login,.btn-send{background:var(--home-grad);color:#fff;font-weight:700;border:0;text-decoration:none;cursor:pointer}.btn-login{border-radius:99px;padding:8px 20px}.btn-ghost{font:inherit;color:#3d6570;background:none;border:0;cursor:pointer}.hero{position:relative;overflow:hidden;background:linear-gradient(180deg,#effaf8,#f3fafa)}.hero:before{content:'';position:absolute;inset:0;background-image:linear-gradient(#b8e8e2 1px,transparent 1px),linear-gradient(90deg,#b8e8e2 1px,transparent 1px);background-size:56px 56px;opacity:.32;mask-image:radial-gradient(ellipse 80% 70% at 50% 0%,#000 30%,transparent 100%);pointer-events:none}.hero-inner{position:relative;max-width:1440px;margin:auto;padding:54px 40px 44px;text-align:center}.hero-badge{display:inline-flex;align-items:center;gap:7px;padding:6px 14px;border-radius:99px;background:#fff;border:1px solid #dcedee;color:#0e8f84;font-size:14px;font-weight:600}.hero-badge i{width:6px;height:6px;border-radius:50%;background:#2ba471;box-shadow:0 0 0 3px #2ba4712e}.hero h1{font-size:44px;line-height:1.24;letter-spacing:-.5px;margin:18px 0 12px;color:#0b6e68}.gradient-text{background:linear-gradient(105deg,#0b6e68,#12a594 52%,#1e9fc4);background-clip:text;color:transparent}.hero .sub{max-width:760px;margin:0 auto;font-size:16px;line-height:1.8;color:#3d6570}.hero-reco{margin:30px auto 0;text-align:left}.sec-head{display:flex;align-items:center;gap:18px;margin-bottom:12px}.sec-head h2{font-size:20px;color:#0b2e36;margin:0}.sec-head>span{font-size:14px;color:#57727c}.reco-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.stage-card{padding:20px 22px;background:#fff;border:1px solid #dcedee;border-radius:14px;box-shadow:0 2px 8px #0b6e680a}.card-index{font-size:12px;font-weight:700;color:#0e8f84}.stage-card h3{font-size:17px;margin:12px 0 8px}.stage-card p{font-size:14px;line-height:1.8;color:#3d6570;margin:0 0 12px}.stage-card small{font-size:12px;color:#57727c}.composer{margin:24px auto 0;background:white;border:1px solid #dcedee;border-radius:18px;box-shadow:0 10px 30px #0b6e6817;overflow:hidden;text-align:left}.composer>label{display:block;padding:18px 22px 0;font-size:14px;color:#57727c}.composer textarea{box-sizing:border-box;display:block;width:100%;padding:12px 22px;border:0;background:none;resize:vertical;min-height:100px;font:inherit;line-height:1.8;outline:none}.cbar{display:flex;align-items:center;gap:20px;padding:12px 16px;border-top:1px solid #eaf5f5}.hint{font-size:14px;color:#57727c}.btn-send{margin-left:auto;border-radius:10px;padding:11px 18px;font:inherit;font-size:14px;display:flex;gap:22px;align-items:center}.chips{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin-top:18px}.chip{padding:7px 13px;border-radius:99px;border:1px solid #dcedee;background:#fff;color:#3d6570;font-size:14px;text-decoration:none}.section{max-width:1440px;box-sizing:border-box;margin:auto;padding:28px 40px 52px}.journey{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;list-style:none;padding:0;margin:20px 0}.journey li{display:flex;align-items:start;gap:12px;padding:18px;border:1px solid #dcedee;border-radius:12px;background:#fff}.journey-no{display:grid;place-items:center;flex:0 0 24px;height:24px;border-radius:7px;background:#dff4f1;color:#0b6e68;font-size:12px}.journey h3{margin:1px 0 8px;font-size:15px}.journey p{margin:0 0 10px;font-size:14px;line-height:1.7;color:#57727c}.journey small{font-size:10px;color:#8a6313}.journey .ready{color:#0e8f84}.scope-note{font-size:14px;line-height:1.8;color:#57727c}.foot{border-top:1px solid #dcedee;background:#fff}.foot-in{max-width:1680px;margin:auto;padding:24px 40px;display:flex;align-items:center;gap:24px;font-size:12px;color:#57727c}.foot strong{color:#0b6e68;font-size:14px}.foot a{margin-left:auto;color:#0b6e68;text-decoration:none}.home-error{font-size:14px;color:#a14332;text-align:left;line-height:1.8}a:focus-visible,button:focus-visible,textarea:focus-visible{outline:3px solid #92ded5;outline-offset:3px}
-.work-placeholder{padding:0;overflow:hidden;cursor:default}.work-placeholder:hover{transform:none;box-shadow:0 2px 8px rgba(11,110,104,.06)}.placeholder-cover{height:112px;display:flex;align-items:center;justify-content:center;gap:14px;background:#effaf8;border-bottom:1px solid #dcedee;color:#57727c;font-size:13px}.placeholder-cover svg{width:40px;height:40px}.placeholder-copy{padding:16px 20px 18px}.placeholder-copy h3{margin:7px 0 6px;font-size:17px}.placeholder-copy p{margin:0;font-size:14px;line-height:1.7;color:#57727c}.placeholder-label{font-size:12px;color:#57727c}.research-home .stage-card.work-placeholder h3{margin-top:7px}
-</style>
+<style scoped lang="scss" src="../styles/research-home.scss"></style>
