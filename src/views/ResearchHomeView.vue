@@ -10,12 +10,12 @@
       <div class="hero-badge"><i aria-hidden="true"></i>市场调查研究工作台</div>
       <h1>让调查材料，成为<span class="gradient-text">有据可查的结论</span></h1>
       <p class="sub">从赛事理解、选题到研究方案，在同一份任务中逐步推进。保留来源和未知项，让每一步研究都有据可查。</p>
-      <section class="hero-reco" aria-labelledby="first-stages-title"><div class="sec-head"><h2 id="first-stages-title">从这里开始你的研究</h2><span>前三阶段可填写并保存本机草稿</span></div><div class="reco-grid"><article v-for="(stage,index) in firstStages" :key="stage.title" class="stage-card"><span class="card-index">0{{index+1}}</span><h3>{{stage.title}}</h3><p>{{stage.description}}</p><small>本机编辑已接入 · 正式确认待接口</small></article></div></section>
+      <section class="hero-reco" aria-labelledby="first-stages-title"><div class="sec-head"><h2 id="first-stages-title">从这里开始你的研究</h2><span>前四阶段可填写并保存本机草稿</span></div><div class="reco-grid"><article v-for="(stage,index) in firstStages" :key="stage.title" class="stage-card"><span class="card-index">0{{index+1}}</span><h3>{{stage.title}}</h3><p>{{stage.description}}</p><small>本机编辑已接入 · 正式确认待接口</small></article></div></section>
       <form class="composer big" @submit.prevent="startResearch"><label for="research-home-prompt">研究任务与背景</label><textarea id="research-home-prompt" v-model="researchPrompt" rows="3" maxlength="12000" placeholder="写下你想调查的问题、赛事背景或当前已有的材料；也可以留空，进入工作台后再填写。"></textarea><div class="cbar"><span class="hint">创建完整研究任务，材料在工作台按阶段整理。</span><button class="btn-send" type="submit">开始完整研究 <span aria-hidden="true">→</span></button></div></form>
       <p v-if="researchStore.storageError" class="home-error" role="alert">{{researchStore.storageError}}</p>
       <div class="chips" aria-label="独立快捷入口"><RouterLink class="chip" to="/research/work?mode=full">继续完整研究 →</RouterLink><RouterLink class="chip" to="/research/work?mode=questionnaire">已有问卷核对 →</RouterLink><RouterLink class="chip" to="/research/work?mode=analysis">已有答卷／数据分析 →</RouterLink></div>
     </div></section>
-    <section class="section" aria-labelledby="research-journey-title"><div class="sec-head"><h2 id="research-journey-title">一份任务，贯穿完整研究</h2><span>已接入与待接入分别呈现</span></div><ol class="journey"><li v-for="(stage,index) in journey" :key="stage.title"><span class="journey-no">{{index+1}}</span><div><h3>{{stage.title}}</h3><p>{{stage.description}}</p><small :class="{ready:index<3}">{{index<3?'可填写 · 本机保存':stage.status}}</small></div></li></ol><p class="scope-note">当前前三阶段支持本机编辑；已有答卷可从独立入口使用本机分析。后续阶段、真实 AI、服务器正式保存和阶段确认按实际交付接入，导航展示不代表整项研究已经完成。</p></section>
+    <section class="section" aria-labelledby="research-journey-title"><div class="sec-head"><h2 id="research-journey-title">一份任务，贯穿完整研究</h2><span>已接入与待接入分别呈现</span></div><ol class="journey"><li v-for="(stage,index) in journey" :key="stage.title"><span class="journey-no">{{index+1}}</span><div><h3>{{stage.title}}</h3><p>{{stage.description}}</p><small :class="{ready:index<4}">{{index<4?'可填写 · 本机保存':stage.status}}</small></div></li></ol><p class="scope-note">当前前四阶段支持本机编辑；已有答卷可从独立入口使用本机分析。后续阶段、真实 AI、服务器正式保存和阶段确认按实际交付接入，导航展示不代表整项研究已经完成。</p></section>
     <footer class="foot"><div class="foot-in"><strong>市调演真 · Survey Research Studio</strong><span>市场调查研究工作台 · 保留依据，审阅后采用</span><RouterLink to="/research/work?mode=full">进入研究工作台 →</RouterLink></div></footer>
   </main>
 </template>
@@ -26,7 +26,7 @@ import {useUserStore} from '@/stores/user'
 import {useResearchStore} from '@/stores/research'
 const userStore=useUserStore(),researchStore=useResearchStore(),router=useRouter(),researchPrompt=ref('')
 const firstStages=[{title:'赛事理解',description:'整理背景、赛事要求与来源，记录仍需核对的未知项。'},{title:'选题分析',description:'比较候选方向，明确研究问题、调查对象与可行性。'},{title:'研究方案',description:'对齐抽样、招募、测量和分析安排，提前发现方案缺项。'}]
-const journey=[...firstStages.map(stage=>({...stage,status:''})),{title:'问卷设计与预测试',description:'设计题目，核对逻辑，记录真实试填与修订。',status:'编辑组件待接入'},{title:'正式调查',description:'平台内发布、匿名填写、回收与停止收集。',status:'待采集服务与部署'},{title:'数据分析',description:'质检数据，记录处理、统计与结果依据。',status:'已有答卷可独立分析；本流程待接入'},{title:'报告与答辩',description:'使用已采用的材料与结果，整理报告和交付。',status:'待接入'}]
+const journey=[...firstStages.map(stage=>({...stage,status:''})),{title:'问卷设计与预测试',description:'设计题目，核对逻辑，记录真实试填与修订。',status:'可填写 · 本机保存'},{title:'正式调查',description:'平台内发布、匿名填写、回收与停止收集。',status:'待采集服务与部署'},{title:'数据分析',description:'质检数据，记录处理、统计与结果依据。',status:'已有答卷可独立分析；本流程待接入'},{title:'报告与答辩',description:'使用已采用的材料与结果，整理报告和交付。',status:'待接入'}]
 function startResearch(){
   const background=researchPrompt.value.trim(),task=researchStore.create('full-study')
   if(background)researchStore.update({title:background.split('\n')[0]!.slice(0,120),competition:{...task.competition,background}})

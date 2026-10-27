@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
-import type { CompetitionDraft, DraftContext, LocalResearchTask, WorkflowKind, SandboxReference, SelectedInputMetadata, ResearchStageDraftUpdate } from '../types/research-contracts';
-import { createLocalTask, editLocalTask, loadTaskRegistry, applyResearchStageUpdate, matchesDraftContext, normalizeCompetitionDraft, saveLocalTask } from '../utils/researchDrafts';
+import type { CompetitionDraft, DraftContext, LocalResearchTask, WorkflowKind, SandboxReference, SelectedInputMetadata, ResearchStageDraftUpdate, QuestionnaireDraftUpdate } from '../types/research-contracts';
+import { createLocalTask, editLocalTask, loadTaskRegistry, applyResearchStageUpdate, applyQuestionnaireUpdate, matchesDraftContext, normalizeCompetitionDraft, saveLocalTask } from '../utils/researchDrafts';
 export const useResearchStore = defineStore('research-tasks', () => {
     const storage = { getItem: (key: string) => localStorage.getItem(key), setItem: (key: string, value: string) => localStorage.setItem(key, value) };
     const loaded = loadTaskRegistry(storage), registry = ref(loaded.registry), draft = ref<LocalResearchTask | null>(null), feedback = ref(''), storageError = ref(loaded.error || '');
@@ -35,7 +35,7 @@ export const useResearchStore = defineStore('research-tasks', () => {
         return draft.value;
     }
     function create(kind: WorkflowKind) { keep(); draft.value = createLocalTask(kind); keep(); registry.value.lastByKind[kind] = draft.value.localTaskId; save(); return draft.value; }
-    function update(patch: Partial<Pick<LocalResearchTask, 'title' | 'competition' | 'topicAnalysis' | 'researchPlan' | 'inputFile' | 'sandboxRef' | 'viewedPhase'>>) { if (!draft.value)
+    function update(patch: Partial<Pick<LocalResearchTask, 'title' | 'competition' | 'topicAnalysis' | 'researchPlan' | 'questionnaire' | 'inputFile' | 'sandboxRef' | 'viewedPhase'>>) { if (!draft.value)
         return; draft.value = editLocalTask(draft.value, patch); feedback.value = '有未保存的本机编辑。'; keep(); }
     function updateCompetition(event: {
         context: DraftContext;
@@ -55,6 +55,12 @@ export const useResearchStore = defineStore('research-tasks', () => {
         feedback.value = '有未保存的本机编辑。';
         keep();
         return true;
+    }
+    function updateQuestionnaire(event:QuestionnaireDraftUpdate){
+        if(!draft.value)return false;
+        const result=applyQuestionnaireUpdate(draft.value,event);
+        if(!result.ok){feedback.value=result.error.message;return false;}
+        draft.value=result.value;feedback.value='有未保存的本机问卷编辑。';keep();return true;
     }
     function persistTaskPatch(localTaskId: string, patch: Partial<Pick<LocalResearchTask, 'sandboxRef' | 'inputFile'>>) {
         const previous = registry.value.tasks[localTaskId];
@@ -77,5 +83,5 @@ export const useResearchStore = defineStore('research-tasks', () => {
     }
     function recordSandboxReference(localTaskId: string, sandboxRef: SandboxReference) { persistTaskPatch(localTaskId, { sandboxRef }); }
     function recordInputFile(localTaskId: string, inputFile: SelectedInputMetadata) { persistTaskPatch(localTaskId, { inputFile }); }
-    return { registry, draft, context, feedback, storageError, open, create, update, updateCompetition, updateStage, save, recordSandboxReference, recordInputFile };
+    return { registry, draft, context, feedback, storageError, open, create, update, updateCompetition, updateStage, updateQuestionnaire, save, recordSandboxReference, recordInputFile };
 });

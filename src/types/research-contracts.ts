@@ -1,3 +1,5 @@
+import type { QuestionnaireDraft } from '../components/research/questionnaire-contract';
+export type { QuestionnaireDraft } from '../components/research/questionnaire-contract';
 import type { TopicDraft } from '../components/research/topic-contract';
 import type { ResearchPlanDraft as EditorResearchPlanDraft } from '../components/research/plan-contract';
 
@@ -120,6 +122,7 @@ export interface LocalResearchTask {
     competition: CompetitionDraft;
     topicAnalysis: TopicAnalysisDraft;
     researchPlan: ResearchPlanDraft;
+    questionnaire: QuestionnaireDraft;
 }
 export interface ResearchFailure {
     code: 'CAPABILITY_UNAVAILABLE' | 'PERSIST_FAILED' | 'STALE_BASELINE' | 'PHASE_LOCKED' | 'UNAUTHORIZED' | 'MISSING_INPUT';
@@ -139,6 +142,7 @@ export interface ContestEditorProps {
     readOnly: boolean;
     issues: string[];
 }
+export interface QuestionnaireDraftUpdate { context: DraftContext; draft: QuestionnaireDraft; }
 export interface ContestDraftUpdate {
     context: DraftContext;
     draft: CompetitionDraft;
