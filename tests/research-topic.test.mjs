@@ -15,16 +15,16 @@ test('old task registries receive an empty topic draft without replacing contest
  old.competition=m.syntheticContestDraft();old.savedAt=20;delete old.topicAnalysis;delete old.researchPlan
  const raw=JSON.stringify({schemaVersion:1,tasks:{legacy:old},lastByKind:{'full-study':'legacy'}});s.setItem(m.TASK_STORAGE_KEY,raw)
  const restored=m.loadTaskRegistry(s)
- assert.equal(restored.error,null);assert.deepEqual(restored.registry.tasks.legacy.topicAnalysis,{candidates:[],selectedCandidateId:null,selectionReason:'',sources:[],unknowns:[]})
+ assert.equal(restored.error,null);assert.deepEqual(restored.registry.tasks.legacy.topicAnalysis,{directions:[],selectedDirectionId:null,selectionReason:'',unknowns:[]})
  assert.deepEqual(restored.registry.tasks.legacy.competition,old.competition);assert.equal(s.getItem(m.TASK_STORAGE_KEY),raw)
 })
 test('topic choices and references survive storage and remain scoped to their original task',async()=>{
  const m=await subject(),s=storage(),a=m.createLocalTask('full-study','A',10),b=m.createLocalTask('full-study','B',11)
- a.topicAnalysis=topic();a.competition=m.syntheticContestDraft()
+ a.topicAnalysis=m.normalizeTopicAnalysisDraft(topic());a.competition=m.syntheticContestDraft()
  let registry=m.saveLocalTask(s,m.emptyTaskRegistry(),a,20);registry=m.saveLocalTask(s,registry,b,21)
  const loaded=m.loadTaskRegistry(s).registry
- assert.deepEqual(loaded.tasks.A.topicAnalysis,topic());assert.deepEqual(loaded.tasks.A.competition,a.competition)
- assert.equal(loaded.tasks.B.topicAnalysis.selectedCandidateId,null);assert.equal(loaded.tasks.B.topicAnalysis.candidates.length,0)
+ assert.deepEqual(loaded.tasks.A.topicAnalysis,m.normalizeTopicAnalysisDraft(topic()));assert.deepEqual(loaded.tasks.A.competition,a.competition)
+ assert.equal(loaded.tasks.B.topicAnalysis.selectedDirectionId,null);assert.equal(loaded.tasks.B.topicAnalysis.directions.length,0)
 })
 test('invalid saved topic data is preserved as a storage error rather than silently discarded',async()=>{
  const m=await subject(),s=storage(),a=m.createLocalTask('full-study','A',10)
@@ -37,7 +37,7 @@ test('topic updates reject other tasks, stale revisions, wrong workflows and ina
  const m=await subject(),a=m.editLocalTask(m.createLocalTask('full-study','A',10),{viewedPhase:1},11)
  const event={phase:1,context:{localTaskId:'A',revision:a.revision},draft:topic()}
  const result=m.applyResearchStageUpdate(a,event,12)
- assert.equal(result.ok,true);assert.deepEqual(result.value.topicAnalysis,topic());assert.equal(result.value.savedAt,null)
+ assert.equal(result.ok,true);assert.deepEqual(result.value.topicAnalysis,m.normalizeTopicAnalysisDraft(topic()));assert.equal(result.value.savedAt,null)
  assert.deepEqual(a.topicAnalysis,m.emptyTopicAnalysisDraft());assert.equal(result.value.revision,a.revision+1)
  assert.equal(m.applyResearchStageUpdate(a,{...event,context:{...event.context,localTaskId:'B'}}).error.code,'STALE_BASELINE')
  assert.equal(m.applyResearchStageUpdate(result.value,event).error.code,'STALE_BASELINE')
@@ -48,7 +48,7 @@ test('topic updates reject other tasks, stale revisions, wrong workflows and ina
 })
 test('topic normalizer rejects invalid references and clones nested lists',async()=>{
  const m=await subject(),input=topic(),clean=m.normalizeTopicAnalysisDraft(input)
- assert.deepEqual(clean,input);clean.candidates[0].sourceIds.push('changed');assert.deepEqual(input.candidates[0].sourceIds,['source-local'])
+ assert.deepEqual(clean,m.normalizeTopicAnalysisDraft(input));clean.legacyDraft.candidates[0].sourceIds.push('changed');assert.deepEqual(input.candidates[0].sourceIds,['source-local'])
  assert.equal(m.normalizeTopicAnalysisDraft({...topic(),candidates:[...topic().candidates,...topic().candidates]}),null)
  assert.equal(m.normalizeTopicAnalysisDraft({...topic(),candidates:[{...topic().candidates[0],sourceIds:['missing']}]}),null)
  assert.equal(m.normalizeTopicAnalysisDraft({...topic(),sources:[{...topic().sources[0],evidenceStatus:'verified'}]}),null)

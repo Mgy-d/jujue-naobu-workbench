@@ -1,3 +1,6 @@
+import type { TopicDraft } from '../components/research/topic-contract';
+import type { ResearchPlanDraft as EditorResearchPlanDraft } from '../components/research/plan-contract';
+
 /** P-owned integration subset of the approved C0 semantics. No endpoint URLs implied. */
 export type WorkflowKind = 'full-study' | 'questionnaire-review' | 'dataset-analysis';
 export interface DraftContext {
@@ -55,14 +58,14 @@ export interface TopicCandidate {
     feasibility: string;
     sourceIds: string[];
 }
-export interface TopicAnalysisDraft {
+export interface LegacyTopicAnalysisDraft {
     candidates: TopicCandidate[];
     selectedCandidateId: string | null;
     selectionReason: string;
     sources: ContestSource[];
     unknowns: ContestUnknown[];
 }
-export interface ResearchPlanDraft {
+export interface LegacyResearchPlanDraft {
     researchQuestion: string;
     targetPopulation: string;
     samplingPlan: string;
@@ -73,6 +76,9 @@ export interface ResearchPlanDraft {
     sources: ContestSource[];
     unknowns: ContestUnknown[];
 }
+/** Current editor shape, with optional preserved pre-delivery content. */
+export type TopicAnalysisDraft = TopicDraft & { legacyDraft?: LegacyTopicAnalysisDraft };
+export type ResearchPlanDraft = EditorResearchPlanDraft & { legacyDraft?: LegacyResearchPlanDraft };
 export type ResearchStageDraftUpdate =
     | { phase: 1; context: DraftContext; draft: TopicAnalysisDraft }
     | { phase: 2; context: DraftContext; draft: ResearchPlanDraft };
@@ -81,14 +87,14 @@ export interface ResearchPlanEditorProps {
     draft: ResearchPlanDraft;
     readOnly: boolean;
     issues: string[];
-    upstream: { competition: CompetitionDraft; topicAnalysis: TopicAnalysisDraft };
+    upstream: { competition: CompetitionDraft | null; topic: TopicAnalysisDraft | null };
 }
 export interface TopicAnalysisEditorProps {
     context: DraftContext;
     draft: TopicAnalysisDraft;
     readOnly: boolean;
     issues: string[];
-    upstream: { competition: CompetitionDraft };
+    upstream: CompetitionDraft | null;
 }
 export interface SelectedInputMetadata {
     name: string;

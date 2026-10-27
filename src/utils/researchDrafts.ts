@@ -45,10 +45,10 @@ export function applyResearchStageUpdate(task: LocalResearchTask, event: Researc
     const invalid = { ok: false, error: { code: 'MISSING_INPUT', message: '组件草稿格式无效，当前编辑未替换。' } } as const;
     if (event.phase === 1) {
         const clean = normalizeTopicAnalysisDraft(event.draft);
-        return clean ? { ok: true, value: editLocalTask(task, { topicAnalysis: clean }, now) } : invalid;
+        return clean ? { ok: true, value: editLocalTask(task, { topicAnalysis: { ...clean, ...(task.topicAnalysis.legacyDraft ? { legacyDraft: task.topicAnalysis.legacyDraft } : {}) } }, now) } : invalid;
     }
     const clean = normalizeResearchPlanDraft(event.draft);
-    return clean ? { ok: true, value: editLocalTask(task, { researchPlan: clean }, now) } : invalid;
+    return clean ? { ok: true, value: editLocalTask(task, { researchPlan: { ...clean, ...(task.researchPlan.legacyDraft ? { legacyDraft: task.researchPlan.legacyDraft } : {}) } }, now) } : invalid;
 }
 function cleanTask(v: any): LocalResearchTask | null {
     const competition = normalizeCompetitionDraft(v?.competition);

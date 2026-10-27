@@ -10,9 +10,9 @@
       <div class="entry-tabs"><RouterLink :class="{active:kind==='full-study'}" to="/research/work?mode=full">完整研究</RouterLink><RouterLink :class="{active:kind==='questionnaire-review'}" to="/research/work?mode=questionnaire">已有问卷核对</RouterLink><RouterLink :class="{active:kind==='dataset-analysis'}" to="/research/work?mode=analysis">已有答卷／数据分析</RouterLink></div>
     </section>
     <section class="workflow-content">
-      <nav class="stage-nav" aria-label="研究阶段"><button v-for="stage in stages" :key="stage.phase" :aria-current="task.viewedPhase===stage.phase?'step':undefined" :class="{selected:task.viewedPhase===stage.phase}" @click="viewStage(stage.phase)"><span>{{stage.phase+1}}</span>{{stage.title}}<small>{{task.viewedPhase===stage.phase?'正在查看':'查看范围'}}</small></button></nav>
+      <nav class="stage-nav" aria-label="研究阶段"><button v-for="stage in stages" :key="stage.phase" :aria-current="task.viewedPhase===stage.phase?'step':undefined" :class="{selected:task.viewedPhase===stage.phase}" @click="viewStage(stage.phase)"><span>{{stage.phase+1}}</span>{{stage.title}}<small>{{task.viewedPhase===stage.phase?'正在查看 · ':''}}{{stageAvailability(stage.phase)}}</small></button></nav>
       <div class="stage-content">
-        <p class="stage-notice">正在查看：{{ currentStage?.title }}。浏览阶段不代表已完成、已采用或已推进。</p>
+        <p class="stage-notice">正在查看：{{ currentStage?.title }}。浏览阶段不代表已完成、已采用或已推进；前三阶段在同一任务中保存，上游资料仍需正式确认。</p>
         <CompetitionUnderstandingHost v-if="kind==='full-study' && task.viewedPhase===0 && store.context" :key="task.localTaskId" :context="store.context" :draft="task.competition" @update-draft="store.updateCompetition" @save-local="store.save()" />
         <ResearchStageHost v-else-if="kind==='full-study' && task.viewedPhase===1 && store.context" :key="task.localTaskId + ':topic'" :phase="1" :context="store.context" :draft="task.topicAnalysis" :competition="task.competition" @update-draft="store.updateStage" @save-local="store.save()" />
         <ResearchStageHost v-else-if="kind==='full-study' && task.viewedPhase===2 && store.context" :key="task.localTaskId + ':plan'" :phase="2" :context="store.context" :draft="task.researchPlan" :competition="task.competition" :topic-analysis="task.topicAnalysis" @update-draft="store.updateStage" @save-local="store.save()" />
@@ -42,6 +42,10 @@ function updateTitle(title:string){store.update({title})}
 function updateInputFile(inputFile:SelectedInputMetadata|null){store.update({inputFile});store.save()}
 function updateSandboxRef(sandboxRef:SandboxReference){if(task.value?.sandboxRef?.workspaceId===sandboxRef.workspaceId&&task.value?.sandboxRef?.runId===sandboxRef.runId)return;store.update({sandboxRef});store.save()}
 function viewStage(viewedPhase:number){store.update({viewedPhase});store.save()}
+function stageAvailability(phase:number){
+ if(kind.value==='full-study')return phase<=2?'本机编辑':phase===4?'待采集服务':phase===5?'分析待接入本流程':'待接入'
+ return kind.value==='dataset-analysis'&&phase===0?'本机分析':'待接入'
+}
 const descriptions:Record<string,string>={'选题分析':'比较候选方向、明确研究问题与对象，检查研究可行性。','研究方案':'确定抽样、招募、测量、证据需求与分析计划。','问卷设计与预测试':'编辑与核对题项，记录真实试填反馈，形成经确认的正式版本。','正式调查':'计划支持平台内匿名发布、手机填写、回收和停止收集；预测试与正式答卷分开。','数据分析':'接入固定调查数据，核查字段与质量，记录处理、统计与结果采用。','报告与答辩':'使用固定且已采用的结果版本，整理报告、附录、来源与交付材料。','问卷核对':'直接核对已有问卷，不补记未发生的赛事理解、选题和研究方案。'}
 const stageDescription=computed(()=>descriptions[currentStage.value?.title||'']||'该阶段的业务组件与正式接口待交付。')
 </script>
