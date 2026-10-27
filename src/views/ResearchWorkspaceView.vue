@@ -3,7 +3,7 @@
     <header class="workspace-nav">
       <RouterLink to="/" class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 19V6M4 19h16M8 19v-6M12 19V9M16 19v-8M20 19v-4" /></svg></span><span><strong>市调演真</strong><small>市场调查研究工作台</small></span></RouterLink>
       <RouterLink to="/" class="home-link">← 返回研究入口</RouterLink>
-      <span class="draft-hint">本机草稿 · 正式服务待接入</span>
+      <span class="draft-hint">{{businessMock?'Mock 测试环境 · 合成响应':'本机草稿 · 正式服务待接入'}}</span>
     </header>
 
     <section class="workspace-heading" aria-label="当前研究任务">
@@ -32,19 +32,24 @@
 
       <section :key="task.localTaskId+':'+task.viewedPhase" class="stage-content" aria-label="阶段填写区">
         <p class="stage-notice">正在查看：{{ currentStage?.title }}。{{kind==='full-study'?'填写和本机保存不代表正式采用或阶段确认。':'此入口独立保存，不补记未发生的前期研究。'}}</p>
-        <CompetitionUnderstandingHost v-if="kind==='full-study' && task.viewedPhase===0 && store.context" :key="task.localTaskId" :context="store.context" :draft="task.competition" @update-draft="store.updateCompetition" @save-local="store.save()" />
-        <ResearchStageHost v-else-if="kind==='full-study' && task.viewedPhase===1 && store.context" :key="task.localTaskId + ':topic'" :phase="1" :context="store.context" :draft="task.topicAnalysis" :competition="task.competition" @update-draft="store.updateStage" @save-local="store.save()" />
-        <ResearchStageHost v-else-if="kind==='full-study' && task.viewedPhase===2 && store.context" :key="task.localTaskId + ':plan'" :phase="2" :context="store.context" :draft="task.researchPlan" :competition="task.competition" :topic-analysis="task.topicAnalysis" @update-draft="store.updateStage" @save-local="store.save()" />
-        <ResearchQuestionnaireHost v-else-if="store.context && ((kind==='full-study' && task.viewedPhase===3)||(kind==='questionnaire-review' && task.viewedPhase===0))" :key="task.localTaskId+':questionnaire'" :context="store.context" :draft="task.questionnaire" :plan="kind==='full-study'?task.researchPlan:null" :independent="kind==='questionnaire-review'" @update-draft="store.updateQuestionnaire" @save-local="store.save()" />
+        <template v-if="!businessBlocked && (!historyExpected || historyVersion)">
+        <p v-if="historyExpected" class="stage-notice">历史只读 · 正在显示服务已采用的固定版本 {{historyVersion?.ref.versionId}}；本机草稿未替换。</p>
+        <CompetitionUnderstandingHost v-if="kind==='full-study' && task.viewedPhase===0 && store.context" :key="task.localTaskId" :context="store.context" :draft="editorTask!.competition"  :read-only="formalReadOnly" @save-candidate="businessPanel?.saveCandidate()" @update-draft="store.updateCompetition" @save-local="store.save()" />
+        <ResearchStageHost v-else-if="kind==='full-study' && task.viewedPhase===1 && store.context" :key="task.localTaskId + ':topic'" :phase="1" :context="store.context" :draft="editorTask!.topicAnalysis" :competition="task.competition"  :read-only="formalReadOnly" @save-candidate="businessPanel?.saveCandidate()" @update-draft="store.updateStage" @save-local="store.save()" />
+        <ResearchStageHost v-else-if="kind==='full-study' && task.viewedPhase===2 && store.context" :key="task.localTaskId + ':plan'" :phase="2" :context="store.context" :draft="editorTask!.researchPlan" :competition="task.competition" :topic-analysis="task.topicAnalysis"  :read-only="formalReadOnly" @save-candidate="businessPanel?.saveCandidate()" @update-draft="store.updateStage" @save-local="store.save()" />
+        <ResearchQuestionnaireHost v-else-if="store.context && ((kind==='full-study' && task.viewedPhase===3)||(kind==='questionnaire-review' && task.viewedPhase===0))" :key="task.localTaskId+':questionnaire'" :context="store.context" :draft="editorTask!.questionnaire" :plan="kind==='full-study'?task.researchPlan:null" :independent="kind==='questionnaire-review'"  :read-only="formalReadOnly" @save-candidate="businessPanel?.saveCandidate()" @update-draft="store.updateQuestionnaire" @save-local="store.save()" />
         <ResearchSandboxView v-else-if="kind==='dataset-analysis' && task.viewedPhase===0" :key="task.localTaskId" :task-id="task.localTaskId" :task-title="task.title" :initial-sandbox-ref="task.sandboxRef" :persist-sandbox-reference="store.recordSandboxReference" :persist-input-file="store.recordInputFile" @update:task-title="updateTitle" @update:input-file="updateInputFile" @update:sandbox-ref="updateSandboxRef" />
         <div v-else class="stage-pending"><h2>{{currentStage?.title}}</h2><p>{{ stageDescription }}</p><p>业务功能待接入；没有将此任务标为完成，也没有调用旧数模智能体。</p><button v-if="task.viewedPhase>0" @click="viewStage(0)">返回{{stages[0]?.title}}</button></div>
+        </template>
+        <p v-else role="status" class="stage-notice">项目权限或已采用的固定历史版本尚未读取成功；请查看右侧提示并重新读取项目。本机草稿保留，不用它替代已采用的历史版本。</p>
       </section>
 
       <aside class="context" aria-label="任务与保存反馈">
         <h2>任务与草稿</h2>
-        <label class="task-title-field">研究任务名称<input :value="task.title" maxlength="120" @input="updateTitle(($event.target as HTMLInputElement).value)" @change="store.save()" /></label>
+        <label class="task-title-field">研究任务名称<input :disabled="formalReadOnly" :value="task.title" maxlength="120" @input="updateTitle(($event.target as HTMLInputElement).value)" @change="store.save()" /></label>
         <section class="save-state" :class="{error:store.storageError,unsaved:!task.savedAt}"><h3>{{store.storageError?'本机保存未成功':task.savedAt?'本机草稿已保存':'编辑尚未保存'}}</h3><p v-if="store.storageError" role="alert" class="storage-error">{{ store.storageError }}</p><p v-else role="status" class="save-feedback">{{ store.feedback }}</p></section>
-        <dl class="task-facts"><div><dt>研究类型</dt><dd>{{ modeLabel }}</dd></div><div><dt>正在查看</dt><dd>{{ currentStage?.title }}</dd></div><div><dt>正式成果</dt><dd>尚无正式候选</dd></div></dl>
+        <BusinessProjectPanel ref="businessPanel" :task="task" @read-only="formalReadOnly=$event" @binding-blocked="businessBlocked=$event" @project-state="businessProject=$event" @history-version="historyVersion=$event" @restore-version="restoreVersion" />
+        <dl class="task-facts"><div><dt>研究类型</dt><dd>{{ modeLabel }}</dd></div><div><dt>正在查看</dt><dd>{{ currentStage?.title }}</dd></div><div><dt>正式成果</dt><dd>{{businessProject?'Mock 候选 '+businessProject.candidates.length+' 个；非正式交付':'尚无正式候选'}}</dd></div></dl>
         <section class="stage-guide"><h3>本阶段填写</h3><p>{{ stageDescription }}</p></section>
         <section class="service-scope"><h3>保存范围</h3><p><span>浏览器本机草稿</span><strong>可用</strong></p><p><span>服务器正式保存</span><small>待接入</small></p><p><span>正式阶段确认</span><small>待接入</small></p></section>
         <details class="task-details"><summary>任务信息</summary><p>本机编号：{{task.localTaskId}}</p><p>正式项目尚未建立，待服务端接入。</p></details>
@@ -54,27 +59,36 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute,useRouter } from 'vue-router'
 import ResearchSandboxView from '@/views/ResearchSandboxView.vue'
 import CompetitionUnderstandingHost from '@/views/research/CompetitionUnderstandingHost.vue'
 import ResearchStageHost from '@/views/research/ResearchStageHost.vue'
 import ResearchQuestionnaireHost from '@/views/research/ResearchQuestionnaireHost.vue'
+import BusinessProjectPanel from '@/views/research/BusinessProjectPanel.vue'
+import type {BusinessProject,FixedCandidate} from '@/types/research-business'
+import {cleanPhaseContent} from '@/api/researchBusiness'
 import { useResearchStore } from '@/stores/research'
 import { kindToMode,modeToKind,stagesFor,workflowLabel } from '@/utils/researchDrafts'
 import type {SelectedInputMetadata,SandboxReference} from '@/types/research-contracts'
+const businessBlocked=ref(false),businessProject=ref<BusinessProject|null>(null),historyVersion=ref<FixedCandidate|null>(null)
+const businessPanel=ref<InstanceType<typeof BusinessProjectPanel>|null>(null),formalReadOnly=ref(false),businessMock=import.meta.env.VITE_RESEARCH_BUSINESS_MODE==='mock'
 const route=useRoute(),router=useRouter(),store=useResearchStore()
 const kind=computed(()=>modeToKind(route.query.mode)),task=computed(()=>store.draft),modeLabel=computed(()=>workflowLabel(kind.value))
+const historyExpected=computed(()=>!!task.value && !!businessProject.value?.lockedPhases.includes(task.value.viewedPhase))
+const editorTask=computed(()=>{const current=task.value,version=historyVersion.value;if(!current||!version||!historyExpected.value||version.phase!==current.viewedPhase)return current;const content=cleanPhaseContent(current.workflowKind,version.phase,version.content);if(!content)return current;const field=current.workflowKind==='questionnaire-review'?'questionnaire':version.phase===0?'competition':version.phase===1?'topicAnalysis':version.phase===2?'researchPlan':'questionnaire';return {...current,[field]:content}})
 const tasks=computed(()=>Object.values(store.registry.tasks).filter(t=>t.workflowKind===kind.value).sort((a,b)=>b.updatedAt-a.updatedAt))
 const stages=computed(()=>stagesFor(kind.value)),currentStage=computed(()=>stages.value[task.value?.viewedPhase??0])
 watch(()=>[kind.value,route.query.task],()=>{store.open(kind.value,typeof route.query.task==='string'?route.query.task:undefined)},{immediate:true})
+function restoreVersion(version:FixedCandidate){const current=task.value;if(!current||formalReadOnly.value||version.phase!==current.viewedPhase)return;const content=cleanPhaseContent(current.workflowKind,version.phase,version.content);if(!content)return;if(current.workflowKind==='questionnaire-review')store.update({questionnaire:content as typeof current.questionnaire});else if(version.phase===0)store.update({competition:content as typeof current.competition});else if(version.phase===1)store.update({topicAnalysis:content as typeof current.topicAnalysis});else if(version.phase===2)store.update({researchPlan:content as typeof current.researchPlan});else if(version.phase===3)store.update({questionnaire:content as typeof current.questionnaire})}
 function newTask(){const next=store.create(kind.value);void router.push({path:'/research/work',query:{mode:kindToMode(kind.value),task:next.localTaskId}})}
 function continueTask(localTaskId:string){void router.push({path:'/research/work',query:{mode:kindToMode(kind.value),task:localTaskId}})}
-function updateTitle(title:string){store.update({title})}
+function updateTitle(title:string){if(!formalReadOnly.value)store.update({title})}
 function updateInputFile(inputFile:SelectedInputMetadata|null){store.update({inputFile});store.save()}
 function updateSandboxRef(sandboxRef:SandboxReference){if(task.value?.sandboxRef?.workspaceId===sandboxRef.workspaceId&&task.value?.sandboxRef?.runId===sandboxRef.runId)return;store.update({sandboxRef});store.save()}
 function viewStage(viewedPhase:number){store.update({viewedPhase});store.save()}
 function stageAvailability(phase:number){
+ if(businessProject.value?.lockedPhases.includes(phase))return '历史只读'
  if(kind.value==='full-study')return phase<=3?'本机编辑':phase===4?'待采集服务':phase===5?'分析待接入本流程':'待接入'
  return kind.value==='questionnaire-review'?'本机编辑':phase===0?'本机分析':'待接入'
 }

@@ -9,6 +9,7 @@ declare module '*.vue' {
 
 /** 补 Vite 的环境变量类型，让 import.meta.env.XXX 有类型 */
 interface ImportMetaEnv {
+  readonly VITE_RESEARCH_BUSINESS_MODE?: 'mock'
   readonly VITE_BACKEND_TARGET?: string
   readonly VITE_SMYY_AGENT_NAME?: string
   readonly VITE_SMYY_AGENT_ID?: string

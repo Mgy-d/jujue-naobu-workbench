@@ -6,6 +6,7 @@
   "description": "市调演真 · 市场调查研究工作台",
   "scripts": {
     "dev": "vite",
+    "dev:business-mock": "node scripts/dev-research-business-mock.mjs",
     "build": "vue-tsc -b && vite build",
     "test": "node --test tests/*.test.mjs",
     "preview": "vite preview"
