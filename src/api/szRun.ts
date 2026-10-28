@@ -99,17 +99,19 @@ export function buildResearchRequest(identity: ResearchIdentity, text: string, i
 
 export class ResearchRunTracker {
   status: ResearchRunStatus = 'running'; message = ''; texts: Record<string,string> = {}; interrupts: AguiInterrupt[] = []
+  private started = false
   constructor(readonly threadId: string, readonly runId: string) {}
   accept(event: AguiEvent): void {
     if (this.status !== 'running') return
     if (typeof event.threadId === 'string' && event.threadId !== this.threadId || typeof event.runId === 'string' && event.runId !== this.runId) { this.status='error';this.message='事件的会话或运行身份不匹配。';return }
+    if(event.type==='RUN_STARTED' && event.threadId===this.threadId && event.runId===this.runId)this.started=true
     const error = runEventError(event)
     if (error) { this.status='error';this.message=error;return }
     if (event.type === 'TEXT_MESSAGE_CONTENT' && typeof event.delta === 'string') { const id = typeof event.messageId === 'string' ? event.messageId : 'assistant';this.texts[id]=(this.texts[id] || '')+event.delta }
     if (event.type !== 'RUN_FINISHED') return
     const outcome = object(event.outcome), kind = outcome?.type
     if (kind === 'interrupt') { this.interrupts=extractInterrupts(event);this.status=this.interrupts.length?'interrupt':'uncertain';if (!this.interrupts.length)this.message='服务提示需要确认，但未返回完整中断身份。' }
-    else if (kind === 'success') this.status='success'
+    else if (kind === 'success' || event.outcome == null && this.started && event.threadId===this.threadId && event.runId===this.runId) this.status='success'
     else { this.status='uncertain';this.message='结束事件没有明确成功状态，请核对会话。' }
   }
   finish(){ if(this.status==='running'){this.status='uncertain';this.message='连接结束但没有收到运行终态，请核对会话。'} return {status:this.status,message:this.message,texts:this.texts,interrupts:this.interrupts} }

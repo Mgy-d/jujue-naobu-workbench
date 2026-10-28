@@ -4,8 +4,8 @@ import { defineStore } from 'pinia'
 import { getAccessToken } from '@/api/http'
 import { fetchAguiEvents } from '@/api/aguiEvents'
 import { extractInterrupts } from '@/api/agui'
-import { verifyResearchAgent, interruptResearchSession } from '@/api/researchAgent'
-import { fetchSessionTranscript, fetchSessionRunStatus } from '@/api/session'
+import { verifyResearchAgent, interruptResearchSession, fetchResearchRunStatus, type ResearchSessionStatus } from '@/api/researchAgent'
+import { fetchSessionTranscript } from '@/api/session'
 import { listPendingInterrupts, listLiveInterruptIds, registerInterrupts, removePendingInterrupt } from '@/api/formInterrupt'
 import { fetchArtifactTree, fetchArtifactContent } from '@/api/artifact'
 import { collectResolvedToolCallIds } from '@/utils/analysis/gateRebuild'
@@ -25,7 +25,7 @@ export interface ResearchRunServices {
   events?: (threadId:string) => Promise<Array<{runId?:string;payload:AguiEvent}>>
   live?: (agentId:string,threadId:string) => Promise<string[] | null>
   stop?: (agentId:string,threadId:string) => Promise<{session_id:string;interrupted:boolean}>
-  runStatus: (agentId:string,threadId:string) => Promise<{running:boolean;pendingWork?:boolean}>
+  runStatus: (agentId:string,threadId:string) => Promise<ResearchSessionStatus>
   register: (agentId:string,threadId:string,items:AguiInterrupt[],runId:string) => Promise<void>
   remove: (agentId:string,threadId:string,toolCallId:string) => Promise<void>
   tree: (agentId:string,threadId:string) => Promise<ArtifactNode[]>
@@ -88,7 +88,7 @@ export class ResearchRunSession {
       if (this.identity && this.identity.status!=='new') {
         const [pending,status]=await Promise.all([this.services.pending(scope.agentId,this.identity.threadId),this.services.runStatus(scope.agentId,this.identity.threadId)])
         if(!this.active(epoch))return
-        if(pending.length || status.running || status.pendingWork) throw new Error('会话仍在运行或存在待确认内容，请先恢复会话。')
+        if(pending.length || status.running || status.pendingWork || status.continuationPlanned || status.awaitingInput) throw new Error('会话仍在运行或存在待确认内容，请先恢复会话。')
       }
       let identity=this.identity || createResearchIdentity(scope,this.uuid)
       const runId='run-'+this.uuid()
@@ -152,6 +152,8 @@ export class ResearchRunSession {
       const state=await this.services.runStatus(this.scope.agentId,this.identity.threadId)
       if(!this.active(epoch) || !this.identity)return
       if(state.running || state.pendingWork){this.persist({...this.identity,status:'running',pendingIds:[]});this.status='working';this.notice='本轮回复已结束，后台仍有工作；请稍后核对会话。';return}
+      if(state.continuationPlanned){this.persist({...this.identity,status:'running',pendingIds:[]});this.status='working';this.notice='本轮回复已结束，进度台账仍有待推进工作；请恢复会话核对。';return}
+      if(state.awaitingInput)throw new Error('进度台账提示待人工确认，但尚未恢复对应表单。')
       this.persist({...this.identity,status:'finished',pendingIds:[]});this.status='finished';this.notice='本轮对话已结束；研究成果和阶段确认仍需核对。'
     }catch(e){
       if(!this.active(epoch) || !this.identity)return
@@ -214,10 +216,12 @@ export class ResearchRunSession {
       this.interrupts=recovered
       if(status.running || status.pendingWork){this.status='working';this.notice='服务端仍有工作，等待后再刷新状态。';return}
       if(recovered.length){this.status='interrupt';this.notice='已恢复待答表单，请核对后继续。';return}
+      if(status.continuationPlanned){this.status='working';this.notice='进度台账仍有待推进工作；这不代表子任务当前仍在执行，请核对会话。';return}
+      if(status.awaitingInput){this.status='uncertain';this.error='进度台账提示待人工确认，但没有可核对的待答表单，请核查登记或超时状态。';return}
       const unresolved=identity.pendingIds.filter(id=>{const toolId=id.split(':').slice(1).join(':');return !toolId || !resolved.has(toolId)})
       if(unresolved.length){this.status='uncertain';this.error='无法核对已记录的待答表单，请勿重复提交。';return}
       this.status='finished';this.notice='会话当前空闲；以真实产物与人工确认判断研究进度。'
-    } catch(e){if(!this.active(epoch))return;this.status='uncertain';this.interrupts=[];this.messages=[];this.artifacts=[];this.preview=null;if(description(e).includes('已答中断'))this.halt(description(e));else this.error=description(e)}
+    } catch(e){if(!this.active(epoch))return;this.notice='';this.status='uncertain';this.interrupts=[];this.messages=[];this.artifacts=[];this.preview=null;if(description(e).includes('已答中断'))this.halt(description(e));else this.error=description(e)}
     finally{if(this.active(epoch))this.busy=false}
   }
   async stopServer() {
@@ -280,7 +284,7 @@ const services:ResearchRunServices={
     }
     throw Error('会话事件记录超过核对范围，无法安全恢复。')
   },
-  runStatus:fetchSessionRunStatus,
+  runStatus:fetchResearchRunStatus,
   register:registerInterrupts,
   remove:removePendingInterrupt,
   tree:fetchArtifactTree,

@@ -68,7 +68,7 @@ function storageChanged(event:StorageEvent){if(event.key==='access_token'||event
 function authChanged(){void syncIdentity()}
 onMounted(()=>{window.addEventListener('storage',storageChanged);window.addEventListener(AUTH_CHANGE_EVENT,authChanged)})
 onBeforeUnmount(()=>{generation++;window.removeEventListener('storage',storageChanged);window.removeEventListener(AUTH_CHANGE_EVENT,authChanged)})
-const statusLabel=computed(()=>({idle:'等待操作',checking:'检查模型',running:'运行中',interrupt:'等待确认',uncertain:'需核对',finished:'本轮已结束',working:'后台处理中'}[session.status]))
+const statusLabel=computed(()=>({idle:'等待操作',checking:'检查模型',running:'运行中',interrupt:'等待确认',uncertain:'需核对',finished:'本轮已结束',working:'待推进／核对'}[session.status]))
 const forms=ref<ResearchForm[]>([])
 watch(()=>session.interrupts,items=>{try{const next=items.map(normalizeResearchInterrupt);formsError.value='';for(const form of next){if(!answers[form.interruptId]){answers[form.interruptId]={};for(const field of form.fields)if(field.initialValue!==undefined)answers[form.interruptId]![field.key]=field.initialValue}}forms.value=next}catch(e){formsError.value=e instanceof Error?e.message:'无法解析表单。';forms.value=[]}},{immediate:true,deep:true})
 function inputId(id:string,key:string){return 'sz-field-'+encodeURIComponent(id)+'-'+encodeURIComponent(key)}

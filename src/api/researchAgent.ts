@@ -1,4 +1,5 @@
 import { http } from '@/api/http'
+import { fetchSessionProgress, fetchSessionRunStatus } from '@/api/session'
 import { configuredResearchAgent } from '@/config/researchAgent'
 
 /** The list is accessible to ordinary authenticated users; detail is admin-only on this source version. */
@@ -18,4 +19,30 @@ export async function interruptResearchSession(agentId:string,threadId:string):P
   const result=await http.post<{session_id:string;interrupted:boolean}>(path,undefined,{timeoutMs:10000})
   if(!result || result.session_id!==threadId || typeof result.interrupted!=='boolean')throw new Error('停止响应的会话身份不匹配。')
   return result
+}
+
+
+export interface ResearchSessionStatus {
+  running:boolean
+  pendingWork?:boolean
+  /** Older platforms expose only a model-written ledger. This is not proof of an active child. */
+  continuationPlanned?:boolean
+  awaitingInput?:boolean
+}
+
+/** Keep old-platform idle parents distinct from completed research, without changing math-model behavior. */
+export async function fetchResearchRunStatus(agentId:string,threadId:string):Promise<ResearchSessionStatus> {
+  const state=await fetchSessionRunStatus(agentId,threadId) as {sessionId?:string;running?:unknown;pendingWork?:unknown}
+  if(!state || typeof state.running!=='boolean')throw new Error('服务端运行状态不完整，请恢复会话核对。')
+  if(state.sessionId!==undefined && state.sessionId!==threadId)throw new Error('运行状态的会话身份不匹配。')
+  if(typeof state.pendingWork==='boolean')return {running:state.running,pendingWork:state.pendingWork}
+  if(state.running)return {running:true}
+  const progress=await fetchSessionProgress(agentId,threadId) as {sessionId?:string;nextAction?:string}
+  if(progress?.sessionId!==undefined && progress.sessionId!==threadId)throw new Error('进度台账的会话身份不匹配。')
+  switch(progress?.nextAction){
+    case 'CONTINUE':return {running:false,continuationPlanned:true}
+    case 'WAIT_HITL':return {running:false,awaitingInput:true}
+    case 'DONE':case 'IDLE':return {running:false}
+    default:throw new Error('当前后台未提供待办状态，进度台账也无法确认，请恢复会话核对。')
+  }
 }
