@@ -32,6 +32,7 @@
 
       <section :key="task.localTaskId+':'+task.viewedPhase" class="stage-content" aria-label="阶段填写区">
         <p class="stage-notice">正在查看：{{ currentStage?.title }}。{{kind==='full-study'?'填写和本机保存不代表正式采用或阶段确认。':'此入口独立保存，不补记未发生的前期研究。'}}</p>
+        <ResearchAgentPanel v-if="kind==='full-study' && task.viewedPhase<=2" :key="task.localTaskId" :task="task" :read-only="formalReadOnly || businessBlocked" />
         <template v-if="!businessBlocked && (!historyExpected || historyVersion)">
         <p v-if="historyExpected" class="stage-notice">历史只读 · 正在显示服务已采用的固定版本 {{historyVersion?.ref.versionId}}；本机草稿未替换。</p>
         <CompetitionUnderstandingHost v-if="kind==='full-study' && task.viewedPhase===0 && store.context" :key="task.localTaskId" :context="store.context" :draft="editorTask!.competition"  :read-only="formalReadOnly" @save-candidate="businessPanel?.saveCandidate()" @update-draft="store.updateCompetition" @save-local="store.save()" />
@@ -66,6 +67,7 @@ import CompetitionUnderstandingHost from '@/views/research/CompetitionUnderstand
 import ResearchStageHost from '@/views/research/ResearchStageHost.vue'
 import ResearchQuestionnaireHost from '@/views/research/ResearchQuestionnaireHost.vue'
 import BusinessProjectPanel from '@/views/research/BusinessProjectPanel.vue'
+import ResearchAgentPanel from '@/views/research/ResearchAgentPanel.vue'
 import type {BusinessProject,FixedCandidate} from '@/types/research-business'
 import {cleanPhaseContent} from '@/api/researchBusiness'
 import { useResearchStore } from '@/stores/research'

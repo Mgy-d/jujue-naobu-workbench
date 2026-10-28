@@ -15,7 +15,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 import { authApi } from '@/api/auth'
-import { AUTH_MODE, ApiError, clearTokens, getAccessToken } from '@/api/http'
+import { AUTH_MODE, ApiError, clearTokens, getAccessToken, authSnapshot, sameAuth } from '@/api/http'
 
 export interface UserInfo {
   username: string
@@ -152,8 +152,10 @@ export const useUserStore = defineStore('user', () => {
       user.value = null
       return
     }
+    const restoreStart=authSnapshot()
     try {
       const info = await authApi.me()
+      if(!sameAuth(restoreStart)){token.value=getAccessToken();return}
       const cached = localStorage.getItem('user_info')
       const permissions = cached ? ((JSON.parse(cached).permissions as string[] | undefined) ?? []) : []
       user.value = { username: info.username, name: info.username, userId: info.userId, role: info.role, permissions }
@@ -162,6 +164,8 @@ export const useUserStore = defineStore('user', () => {
     } catch {
       // access token 失效 → 尝试用 refresh_token 静默换新
     }
+    if(!sameAuth(restoreStart)){token.value=getAccessToken();if(!token.value)user.value=null;return}
+    const refreshStart=authSnapshot()
     try {
       const tokens = await authApi.refresh()
       token.value = tokens.accessToken
@@ -169,6 +173,7 @@ export const useUserStore = defineStore('user', () => {
       user.value = { username: uname, name: uname, userId: tokens.userId, role: tokens.role, permissions: tokens.permissions ?? [] }
       localStorage.setItem(USER_KEY, JSON.stringify(user.value))
     } catch {
+      if(!sameAuth(refreshStart))return
       clearTokens()
       token.value = ''
       user.value = null
@@ -252,7 +257,9 @@ export const useUserStore = defineStore('user', () => {
   /** 退出登录：real 模式通知后端并清 token，mock 模式仅清本地账号 */
   async function logout(): Promise<void> {
     if (AUTH_MODE === 'real') {
+      const logoutStart=authSnapshot()
       await authApi.logout()
+      if(!sameAuth(logoutStart))return
       clearTokens()
       token.value = ''
     }

@@ -20,6 +20,11 @@ export const TOKEN_KEY = 'access_token'
 export const REFRESH_TOKEN_KEY = 'refresh_token'
 export const USER_ID_KEY = 'user_id'
 export const USER_INFO_KEY = 'user_info'
+export const AUTH_CHANGE_EVENT = 'agent-auth-change'
+let authGeneration = 0
+export const authSnapshot = () => ({access:getAccessToken(), refresh:getRefreshToken(), generation:authGeneration})
+export const sameAuth = (s:ReturnType<typeof authSnapshot>) => s.generation===authGeneration && s.access===getAccessToken() && s.refresh===getRefreshToken()
+function notifyAuthChange() { if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(AUTH_CHANGE_EVENT)) }
 
 /** 非 2xx 响应统一抛出的错误，`message` 已尽量取后端可读文案 */
 export class ApiError extends Error {
@@ -39,6 +44,8 @@ export const getRefreshToken = (): string => localStorage.getItem(REFRESH_TOKEN_
 export function saveTokens(accessToken: string, refreshToken: string): void {
   localStorage.setItem(TOKEN_KEY, accessToken)
   if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+  authGeneration++
+  notifyAuthChange()
 }
 
 export function clearTokens(): void {
@@ -46,6 +53,8 @@ export function clearTokens(): void {
   localStorage.removeItem(REFRESH_TOKEN_KEY)
   localStorage.removeItem(USER_ID_KEY)
   localStorage.removeItem(USER_INFO_KEY)
+  authGeneration++
+  notifyAuthChange()
 }
 
 /** 解析 JWT 的 exp（秒）为毫秒时间戳；无法解析返回 null（交给服务端 401 兜底） */
@@ -70,11 +79,12 @@ export function isAccessTokenExpired(): boolean {
 
 // ── 401 / 过期自动刷新 ──────────────────────────────────────────────────────
 /** 正在进行的 refresh（并发去重），多个 401 共享同一次刷新 */
-let refreshInFlight: Promise<boolean> | null = null
+type AuthSnapshot = ReturnType<typeof authSnapshot>
+let refreshInFlight: {snapshot:AuthSnapshot; promise:Promise<AuthSnapshot|null>} | null = null
 
-async function doRefresh(): Promise<boolean> {
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) return false
+async function doRefresh(snapshot:AuthSnapshot): Promise<AuthSnapshot|null> {
+  const refreshToken = snapshot.refresh
+  if (!refreshToken) return null
   try {
     const tokens = (await rawFetch('/api/auth/refresh', {
       method: 'POST',
@@ -91,8 +101,11 @@ async function doRefresh(): Promise<boolean> {
       username?: string
       role?: string
     }
-    if (!tokens.accessToken) return false
-    saveTokens(tokens.accessToken, tokens.refreshToken ?? refreshToken)
+    if (!tokens.accessToken || !sameAuth(snapshot)) return null
+    const nextRefresh=tokens.refreshToken ?? refreshToken
+    saveTokens(tokens.accessToken, nextRefresh)
+    const committed=authSnapshot()
+    if(committed.access!==tokens.accessToken || committed.refresh!==nextRefresh)return null
     if (tokens.userId) {
       localStorage.setItem(USER_ID_KEY, tokens.userId)
       localStorage.setItem(
@@ -104,32 +117,36 @@ async function doRefresh(): Promise<boolean> {
         }),
       )
     }
-    return true
+    return committed
   } catch {
-    return false
+    return null
   }
 }
 
 /** 用 refresh_token 换新 access token；失败返回 false（调用方负责清会话） */
-export function refreshAccessToken(): Promise<boolean> {
-  if (!refreshInFlight) {
-    refreshInFlight = doRefresh().finally(() => {
-      refreshInFlight = null
-    })
-  }
-  return refreshInFlight
+function refreshAuth():Promise<AuthSnapshot|null> {
+  const snapshot=authSnapshot()
+  if(refreshInFlight && sameAuth(refreshInFlight.snapshot))return refreshInFlight.promise
+  const entry={snapshot,promise:Promise.resolve<AuthSnapshot|null>(null)}
+  entry.promise=doRefresh(snapshot).finally(()=>{if(refreshInFlight===entry)refreshInFlight=null})
+  refreshInFlight=entry
+  return entry.promise
 }
-
-/** refresh 失败时清空本地 token */
-export async function ensureFreshToken(): Promise<boolean> {
-  const ok = await refreshAccessToken()
-  if (!ok) clearTokens()
-  return ok
+export async function refreshAccessToken():Promise<boolean>{
+  const committed=await refreshAuth()
+  return !!committed && sameAuth(committed)
+}
+export async function ensureFreshToken():Promise<boolean>{
+  const snapshot=authSnapshot()
+  const committed=await refreshAuth()
+  if(!committed && sameAuth(snapshot))clearTokens()
+  return !!committed && sameAuth(committed)
 }
 
 // ── 请求核心 ────────────────────────────────────────────────────────────────
 export interface RequestOptions {
   method?: string
+  accept?: string
   body?: unknown
   params?: Record<string, string>
   /** 超时毫秒数；不传则一直等（留给 SSE 之类长连接） */
@@ -165,7 +182,7 @@ async function extractErrorMessage(res: Response): Promise<string> {
 }
 
 async function rawFetch(path: string, options: RequestOptions = {}): Promise<Response> {
-  const { method = 'GET', body, params, skipAuth, timeoutMs, signal, formData } = options
+  const { method = 'GET', body, params, skipAuth, timeoutMs, signal, formData, accept } = options
   const url = new URL(path, window.location.origin)
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
@@ -188,7 +205,7 @@ async function rawFetch(path: string, options: RequestOptions = {}): Promise<Res
     return await fetch(url.toString(), {
       method,
       // multipart 时不设 Content-Type，由浏览器生成 boundary
-      headers: formData ? (skipAuth ? {} : buildHeaders(false, skipAuth)) : buildHeaders(body !== undefined, skipAuth),
+      headers: { ...(formData ? (skipAuth ? {} : buildHeaders(false, skipAuth)) : buildHeaders(body !== undefined, skipAuth)), ...(accept ? { Accept: accept } : {}) },
       body: formData ?? (body !== undefined ? JSON.stringify(body) : undefined),
       signal: controller.signal,
     })
@@ -203,82 +220,39 @@ async function rawFetch(path: string, options: RequestOptions = {}): Promise<Res
   }
 }
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  // 认证端点不参与刷新重试（它们本身就是用来换取 token 的）
-  const isAuthPath = path.startsWith('/api/auth/')
-
-  if (!options.skipAuth && !isAuthPath && isAccessTokenExpired()) {
-    if (!(await ensureFreshToken())) throw new ApiError(401, '登录已过期，请重新登录')
+/** Keep a request associated with the credentials it started with. */
+async function authenticatedFetch(path:string, options:RequestOptions):Promise<Response> {
+  const guarded=!options.skipAuth && !path.startsWith('/api/auth/')
+  if(guarded && isAccessTokenExpired()){
+    if(!(await ensureFreshToken()))throw new ApiError(401,'登录已过期或发生变化，请重新操作')
   }
-
-  let res = await rawFetch(path, options)
-
-  if (res.status === 401 && !options.skipAuth && !isAuthPath) {
-    if (!(await ensureFreshToken())) throw new ApiError(401, '登录已过期，请重新登录')
-    res = await rawFetch(path, options)
+  let snapshot=authSnapshot()
+  let res=await rawFetch(path,options)
+  if(guarded && !sameAuth(snapshot))throw new ApiError(401,'登录状态已变化，请重新操作')
+  if(guarded && res.status===401){
+    if(!(await ensureFreshToken()))throw new ApiError(401,'登录已过期或发生变化，请重新操作')
+    snapshot=authSnapshot()
+    res=await rawFetch(path,options)
+    if(!sameAuth(snapshot))throw new ApiError(401,'登录状态已变化，请重新操作')
   }
-
-  if (!res.ok) throw new ApiError(res.status, await extractErrorMessage(res))
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+  if(!res.ok)throw new ApiError(res.status,await extractErrorMessage(res))
+  return res
 }
 
-/** POST 但期望返回文本（如产物内容接口可能直接回纯文本） */
-async function requestText(path: string, options: RequestOptions = {}): Promise<string> {
-  const isAuthPath = path.startsWith('/api/auth/')
-  if (!options.skipAuth && !isAuthPath && isAccessTokenExpired()) {
-    if (!(await ensureFreshToken())) throw new ApiError(401, '登录已过期，请重新登录')
-  }
-  let res = await rawFetch(path, options)
-  if (res.status === 401 && !options.skipAuth && !isAuthPath) {
-    if (!(await ensureFreshToken())) throw new ApiError(401, '登录已过期，请重新登录')
-    res = await rawFetch(path, options)
-  }
-  if (!res.ok) throw new ApiError(res.status, await extractErrorMessage(res))
+async function request<T>(path:string,options:RequestOptions={}):Promise<T>{
+  const res=await authenticatedFetch(path,options)
+  if(res.status===204)return undefined as T
+  return await res.json() as T
+}
+async function requestText(path:string,options:RequestOptions={}):Promise<string>{
+  const res=await authenticatedFetch(path,options)
   return res.text()
 }
-
-/**
- * SSE / 流式请求：返回原始 Response，由调用方自行读流。
- * 与普通请求的区别：不解析 JSON、不设超时（长连接）；仍自动带 Bearer，并在 401 时静默刷新一次。
- * 用于 AG-UI 的 `POST /agui/run/{agentId}`（后端对该路径同样强制 Bearer）。
- */
-export async function httpStream(
-  path: string,
-  body: unknown,
-  signal?: AbortSignal,
-): Promise<Response> {
-  if (isAccessTokenExpired()) {
-    if (!(await ensureFreshToken())) throw new ApiError(401, '登录已过期，请重新登录')
-  }
-  let res = await rawFetch(path, { method: 'POST', body, signal })
-  if (res.status === 401) {
-    if (!(await ensureFreshToken())) throw new ApiError(401, '登录已过期，请重新登录')
-    res = await rawFetch(path, { method: 'POST', body, signal })
-  }
-  if (!res.ok) throw new ApiError(res.status, await extractErrorMessage(res))
-  return res
+export async function httpStream(path:string,body:unknown,signal?:AbortSignal):Promise<Response>{
+  return authenticatedFetch(path,{method:'POST',body,signal,accept:'text/event-stream'})
 }
-
-/**
- * SSE / 流式 GET 请求：返回原始 Response，由调用方自行读流。
- * 用于订阅后端 `GET /api/notify/stream`（user 级常驻通知流）。
- * 行为对齐 httpStream：自动带 Bearer、401 静默刷新一次、不设超时（长连接）。
- */
-export async function httpStreamGet(
-  path: string,
-  signal?: AbortSignal,
-): Promise<Response> {
-  if (isAccessTokenExpired()) {
-    if (!(await ensureFreshToken())) throw new ApiError(401, '登录已过期，请重新登录')
-  }
-  let res = await rawFetch(path, { method: 'GET', signal })
-  if (res.status === 401) {
-    if (!(await ensureFreshToken())) throw new ApiError(401, '登录已过期，请重新登录')
-    res = await rawFetch(path, { method: 'GET', signal })
-  }
-  if (!res.ok) throw new ApiError(res.status, await extractErrorMessage(res))
-  return res
+export async function httpStreamGet(path:string,signal?:AbortSignal):Promise<Response>{
+  return authenticatedFetch(path,{method:'GET',signal})
 }
 
 export const http = {

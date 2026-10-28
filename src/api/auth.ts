@@ -13,7 +13,7 @@
  *   目标 Java 后端 JWT 为 HS256，access token 默认有效期 30 分钟（可通过后端配置覆盖）。
  */
 
-import { http, saveTokens, USER_ID_KEY, USER_INFO_KEY } from '@/api/http'
+import { http, saveTokens, authSnapshot, sameAuth, USER_ID_KEY, USER_INFO_KEY } from '@/api/http'
 
 export interface TokenResponse {
   accessToken: string
@@ -73,6 +73,7 @@ export const authApi = {
 
   /** 用 refresh_token 换新 token。http 层已封装自动刷新，这里供会话恢复手动调用 */
   async refresh(): Promise<TokenResponse> {
+    const snapshot = authSnapshot()
     const refreshToken = localStorage.getItem('refresh_token')
     if (!refreshToken) throw new Error('无 refresh_token')
     const tokens = await http.post<TokenResponse>(
@@ -80,6 +81,7 @@ export const authApi = {
       { refreshToken },
       { skipAuth: true, timeoutMs: 10000 },
     )
+    if (!sameAuth(snapshot)) throw new Error('登录状态已变化，请重新操作')
     persist(tokens)
     return tokens
   },
