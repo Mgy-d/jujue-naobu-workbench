@@ -1,3 +1,5 @@
+import { fetchAguiEvents, fetchAguiEventWatermark } from '@/api/aguiEvents'
+import type { AguiEvent } from '@/types/agui'
 import { http } from '@/api/http'
 import { fetchSessionProgress, fetchSessionRunStatus } from '@/api/session'
 import { configuredResearchAgent } from '@/config/researchAgent'
@@ -45,4 +47,27 @@ export async function fetchResearchRunStatus(agentId:string,threadId:string):Pro
     case 'DONE':case 'IDLE':return {running:false}
     default:throw new Error('当前后台未提供待办状态，进度台账也无法确认，请恢复会话核对。')
   }
+}
+
+
+/** Read a bounded snapshot of the most recent server run, including its start. */
+export async function fetchResearchRecoveryEvents(threadId:string):Promise<Array<{runId?:string;payload:AguiEvent}>> {
+  let cursor=0, ceiling=Infinity
+  try{
+    const mark=await fetchAguiEventWatermark(threadId)
+    if(mark.latest===true){
+      if(mark.sessionId!==threadId || !Number.isInteger(mark.nextAfterSequence) || !Number.isInteger(mark.lastRunStartSequence) || (mark.lastRunStartSequence||0)<0 || mark.nextAfterSequence<(mark.lastRunStartSequence||0))throw Error('会话事件水位身份或范围无效。')
+      cursor=Math.max(0,(mark.lastRunStartSequence||0)-1);ceiling=mark.nextAfterSequence
+    }
+  }catch(error){if(error instanceof Error && error.message==='会话事件水位身份或范围无效。')throw error}
+  const events:Array<{runId?:string;payload:AguiEvent}>=[]
+  for(let pageNumber=0;pageNumber<50;pageNumber++){
+    const page=await fetchAguiEvents(threadId,cursor,500)
+    if(page.sessionId!==threadId || !Array.isArray(page.events))throw Error('会话事件记录身份不匹配。')
+    events.push(...page.events.filter(e=>e.eventSequence<=ceiling))
+    if(page.events.length<500 || page.nextAfterSequence>=ceiling)return events
+    if(!Number.isInteger(page.nextAfterSequence) || page.nextAfterSequence<=cursor)throw Error('会话事件记录不完整。')
+    cursor=page.nextAfterSequence
+  }
+  throw Error('会话事件记录超过核对范围，无法安全恢复。')
 }

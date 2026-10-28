@@ -141,3 +141,29 @@ export function reconcileResearchPending(items: AguiInterrupt[], resolved: Set<s
   }
   return result
 }
+
+
+/** Background recorders omit interrupt outcome; match the complete tool call to the live registry. */
+export function matchingBackgroundRuns(records:Array<{runId?:string;payload:AguiEvent}>,threadId:string,pending:AguiInterrupt[]):Set<string> {
+  const runs=new Map<string,{started:boolean;finished:boolean;bad:boolean;tools:Map<string,{name:string;args:string}>}>()
+  for(const {runId:run,payload:e} of records){
+    if(!run?.startsWith('srv-'))continue
+    let state=runs.get(run)
+    if(!state){state={started:false,finished:false,bad:false,tools:new Map()};runs.set(run,state)}
+    if(e.threadId!==threadId || e.runId!==run){state.bad=true;continue}
+    if(e.type==='RUN_STARTED'){if(state.started)state.bad=true;state.started=true;continue}
+    if(!state.started || state.finished){state.bad=true;continue}
+    if(runEventError(e)){state.bad=true;continue}
+    if(e.type==='RUN_FINISHED'){state.finished=true;if(e.outcome!=null)state.bad=true;continue}
+    const id=typeof e.toolCallId==='string'?e.toolCallId:''
+    if(e.type==='TOOL_CALL_START' && id){if(state.tools.has(id))state.bad=true;state.tools.set(id,{name:String(e.toolCallName||''),args:''})}
+    if(e.type==='TOOL_CALL_ARGS' && id){const tool=state.tools.get(id);if(!tool || typeof e.delta!=='string'){state.bad=true;continue}tool.args+=e.delta;if(tool.args.length>2000000)state.bad=true}
+  }
+  const stable=(value:unknown):string=>JSON.stringify(value && typeof value==='object'?Array.isArray(value)?value.map(v=>JSON.parse(stable(v))):Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,JSON.parse(stable(v))])):value)
+  const matches=new Set<string>()
+  for(const [run,state] of runs){
+    if(!state.started || !state.finished || state.bad || !pending.length)continue
+    if(pending.every(item=>{const tool=state.tools.get(String(item.toolCallId||interruptId(item).split(':').slice(1).join(':'))),input=object(item.metadata?.toolInput);if(!tool||!input||!['ui_gate','ui_form_advanced'].includes(tool.name)||tool.name!==item.metadata?.toolName)return false;const args=object(tool.args);return !!args && stable(args)===stable(input)}))matches.add(run)
+  }
+  return matches
+}
