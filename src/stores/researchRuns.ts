@@ -72,7 +72,7 @@ export class ResearchRunSession {
       const request=buildResearchRequest(probe,'你好，请只回复一句话。这是模型响应检查，不启动研究、不生成产物。')
       const result=await this.services.run(probe,request,()=>{},ctl.signal);if(!this.active(epoch))return
       const text=Object.values(result.texts).join('').trim();this.probeText=text
-      if(result.status!=='success' || !text) throw new Error('模型探测没有收到完整成功终态和文字，请核对模型通道。')
+      if(result.status!=='success' || !text) throw new Error(result.message || '模型探测没有收到完整成功终态和文字，请核对模型通道。')
       this.probePassed=true;this.verifiedKey=scope.ownerId+':'+scope.agentId;this.status=this.identity?priorStatus:'idle';this.notice='模型已返回文字；这是一次连接检查，不代表研究阶段完成。'
     }catch(e){if(!this.active(epoch))return;this.probePassed=false;this.status='uncertain';this.error=description(e)}
     finally{clearTimeout(timer);if(this.active(epoch)){this.busy=false;this.controller=null}}
