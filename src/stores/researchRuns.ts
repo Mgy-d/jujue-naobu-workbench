@@ -87,7 +87,7 @@ export class ResearchRunSession {
       if (this.identity && this.identity.status!=='new') {
         const [pending,status]=await Promise.all([this.services.pending(scope.agentId,this.identity.threadId),this.services.runStatus(scope.agentId,this.identity.threadId)])
         if(!this.active(epoch))return
-        if(pending.length || status.running || status.pendingWork || status.continuationPlanned ) throw new Error('会话仍在运行或存在待确认内容，请先恢复会话。')
+        if(pending.length || status.running || status.pendingWork || status.continuationPlanned || status.continuationUnknown) throw new Error('会话仍在运行或存在待确认内容，请先恢复会话。')
       }
       let identity=this.identity || createResearchIdentity(scope,this.uuid)
       const runId='run-'+this.uuid()
@@ -152,6 +152,7 @@ export class ResearchRunSession {
       if(!this.active(epoch) || !this.identity)return
       if(state.running || state.pendingWork){this.persist({...this.identity,status:'running',pendingIds:[]});this.status='working';this.notice='本轮回复已结束，后台仍有工作；请稍后核对会话。';return}
       if(state.continuationPlanned){this.persist({...this.identity,status:'running',pendingIds:[]});this.status='working';this.notice='本轮回复已结束，进度台账仍有待推进工作；请恢复会话核对。';return}
+      if(state.continuationUnknown)throw new Error('当前后台未提供待办状态，进度台账也无法确认，请恢复会话核对。')
       if(state.awaitingInput){
         const pending=await this.services.pending(this.scope.agentId,this.identity.threadId)
         if(!this.active(epoch) || !this.identity)return
@@ -201,6 +202,7 @@ export class ResearchRunSession {
       ])
       if(!this.active(epoch))return
       if(status.running || status.pendingWork)throw Error('服务端仍在处理，请稍后再核对。')
+      if(status.continuationUnknown)throw Error('服务端进度仍需核对，暂不能解除保护。')
       if(live===null)throw Error('服务端未提供可核对的实时审核登记，暂不能解除保护。')
       if(pending.length || live.length)throw Error('服务端仍有待答审核，请由平台核查后再恢复；未重新提交。')
       const ids=[...new Set([...identity.submittedIds,...identity.pendingIds])]
@@ -218,6 +220,10 @@ export class ResearchRunSession {
     try {
       const [transcript,pending,status]=await Promise.all([this.services.transcript(scope.agentId,identity.threadId),this.services.pending(scope.agentId,identity.threadId),this.services.runStatus(scope.agentId,identity.threadId)])
       if(!this.active(epoch))return
+      this.messages=(transcript.messages || []).filter(m=>m.role==='user'||m.role==='assistant').map(m=>({id:m.id,role:m.role as 'user'|'assistant',text:(m.content || []).filter(b=>b.type==='text').map(b=>b.text||'').join('')})).filter(m=>m.text)
+      // A resume can still own its SDK registration while the model is running.
+      // Keep submitted IDs and wait for an idle snapshot before judging revival.
+      if(status.running || status.pendingWork){this.interrupts=[];this.status='working';this.notice='服务端仍有工作，等待后再刷新状态。';return}
       const resolved=collectResolvedToolCallIds(transcript.messages as never[])
       // A new background form may lack runId in the registration. Accept only
       // an exact, unambiguous match in this session's recorded terminal events.
@@ -240,11 +246,10 @@ export class ResearchRunSession {
       }
       const recovered=reconcileResearchPending(pending,resolved,confirmedIdentity)
       if(confirmedIdentity!==identity)this.persist(confirmedIdentity)
-      this.messages=(transcript.messages || []).filter(m=>m.role==='user'||m.role==='assistant').map(m=>({id:m.id,role:m.role as 'user'|'assistant',text:(m.content || []).filter(b=>b.type==='text').map(b=>b.text||'').join('')})).filter(m=>m.text)
       this.interrupts=recovered
-      if(status.running || status.pendingWork){this.status='working';this.notice='服务端仍有工作，等待后再刷新状态。';return}
       if(recovered.length){this.status='interrupt';this.notice='已恢复待答表单，请核对后继续。';return}
       if(status.continuationPlanned){this.status='working';this.notice='进度台账仍有待推进工作；这不代表子任务当前仍在执行，请核对会话。';return}
+      if(status.continuationUnknown)throw Error('当前后台未提供待办状态，进度台账也无法确认，请恢复会话核对。')
       const unresolved=identity.pendingIds.filter(id=>{const toolId=id.split(':').slice(1).join(':');return !toolId || !resolved.has(toolId)})
       if(unresolved.length){this.status='uncertain';this.error='无法核对已记录的待答表单，请勿重复提交。';return}
       if(status.awaitingInput){this.status='awaiting';this.notice='本轮回复已结束；服务端等待后续输入，当前没有登记待审核表单。';return}

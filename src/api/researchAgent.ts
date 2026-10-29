@@ -29,6 +29,8 @@ export interface ResearchSessionStatus {
   pendingWork?:boolean
   /** Older platforms expose only a model-written ledger. This is not proof of an active child. */
   continuationPlanned?:boolean
+  /** Parent is idle, but its model-written progress ledger cannot determine completion. */
+  continuationUnknown?:boolean
   awaitingInput?:boolean
 }
 
@@ -42,6 +44,7 @@ export async function fetchResearchRunStatus(agentId:string,threadId:string):Pro
   const progress=await fetchSessionProgress(agentId,threadId) as {sessionId?:string;nextAction?:string}
   if(progress?.sessionId!==undefined && progress.sessionId!==threadId)throw new Error('进度台账的会话身份不匹配。')
   switch(progress?.nextAction){
+    case 'UNKNOWN':return {running:false,continuationUnknown:true}
     case 'CONTINUE':return {running:false,continuationPlanned:true}
     case 'WAIT_HITL':return {running:false,awaitingInput:true}
     case 'DONE':case 'IDLE':return {running:false}

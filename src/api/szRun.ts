@@ -5,16 +5,16 @@ import type { AguiEvent, AguiInterrupt, AguiResumeItem, AguiRunRequest } from '@
 export interface ResearchIdentity { agentId: string; projectId: string; threadId: string; runId: string }
 /** Strict evidence for unlocking a blocked session, not evidence of stage approval. */
 export function successfulResearchHitlIds(messages: unknown[]): Set<string> {
-  const calls=new Map<string,{count:number;index:number;hitl:boolean}>(), results=new Map<string,number>()
+  const calls=new Map<string,{count:number;index:number;hitl:boolean}>(), results=new Map<string,{count:number;index:number;success:boolean}>()
   for(const [index,raw] of messages.entries()){
     const msg=object(raw);if(!msg || !Array.isArray(msg.content))continue
     for(const rawBlock of msg.content){
       const b=object(rawBlock);if(!b || typeof b.id!=='string' || !b.id)continue
       if(b.type==='tool_call')calls.set(b.id,{count:(calls.get(b.id)?.count||0)+1,index,hitl:msg.role==='assistant' && (b.name==='ui_gate'||b.name==='ui_form_advanced')})
-      if(b.type==='tool_result' && b.state==='success')results.set(b.id,index)
+      if(b.type==='tool_result')results.set(b.id,{count:(results.get(b.id)?.count||0)+1,index,success:b.state==='success' && !String(b.output??'').includes('[HITL_TIMEOUT]')})
     }
   }
-  return new Set([...calls].filter(([id,c])=>c.count===1 && c.hitl && (results.get(id)??-1)>=c.index).map(([id])=>id))
+  return new Set([...calls].filter(([id,c])=>{const r=results.get(id);return c.count===1 && c.hitl && r?.count===1 && r.success && r.index>=c.index}).map(([id])=>id))
 }
 export type ResearchRunStatus = 'running' | 'success' | 'interrupt' | 'error' | 'uncertain'
 export interface ResearchField {
