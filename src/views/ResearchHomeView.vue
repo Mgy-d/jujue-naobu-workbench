@@ -37,7 +37,7 @@
     <section class="section" aria-labelledby="all-works-title"><div class="sec-head"><h2 id="all-works-title">全部作品</h2><span class="sub">展示位置预留 · 真实作品接入后开放筛选与查看</span></div>
       <div class="filters" aria-label="作品筛选占位"><div class="frow"><span class="lbl">研究入口</span><div class="opts"><button v-for="label in ['全部','完整研究','已有问卷','已有答卷']" :key="label" type="button" class="chip" :class="{on:label==='全部'}" disabled>{{label}}</button></div></div><div class="frow"><span class="lbl">研究方式</span><div class="opts"><button v-for="label in ['全部','问卷调查','访谈研究','已有数据分析']" :key="label" type="button" class="chip" :class="{on:label==='全部'}" disabled>{{label}}</button></div></div><div class="frow"><span class="lbl">作品年份</span><div class="opts"><button type="button" class="chip on" disabled>全部</button><span class="filter-note">作品资料待接入</span></div></div></div>
       <div class="grid"><article v-for="index in placeholderWorks" :key="index" class="gcard work-catalog-card"><div class="top"><span class="tag-c">作品占位</span><span class="mtag">待接入</span></div><h4>研究作品展示位 {{index}}</h4><p>这里预留作品简介与研究成果，真实内容接入后展示。</p><div class="mtags"><span class="mtag">封面预留</span><span class="mtag">简介预留</span><span class="mtag">成果预留</span></div></article></div>
-      <p class="scope-note">作品卡片为占位展示。当前前四阶段支持本机填写和保存；真实 AI、正式保存与阶段确认仍待接入。</p>
+      <p class="scope-note">作品卡片为占位展示。工作台支持七阶段浏览、本机草稿与本机数据分析。智能体能力按阶段接入；问卷发布、正式保存与阶段确认待服务交付。</p>
     </section>
     <footer class="foot"><div class="foot-in"><strong>市调演真 · Survey Research Studio</strong><div class="grow"></div><span>面向市场调查的材料、分析与成果协作工作台</span></div></footer>
   </main>
