@@ -35,10 +35,18 @@
         </section>
         <button :disabled="session.busy||session.stopping||readOnly||session.status!=='interrupt'||!!formsError" @click="submitForms">提交全部表单并继续</button>
       </div>
+      <section class="stage-artifacts" aria-label="当前阶段智能体成果">
+        <h3>当前阶段成果 · {{stageName}}</h3>
+        <p>{{stageHint}}</p>
+        <button class="secondary" :disabled="session.busy||!session.identity?.runId" @click="session.refreshArtifacts()">读取当前阶段成果</button>
+        <ul><li v-for="item in phaseFiles" :key="item.path"><strong>{{item.name}}</strong><small>{{item.path}}</small><button :disabled="session.busy" @click="session.previewArtifact(item.path)">预览成果</button><button :disabled="session.busy||downloading" @click="download(item.path)">下载成果</button></li></ul>
+        <p v-if="!phaseFiles.length">尚未读到当前项目的本阶段文件；不会用其他研究或本机示例替代。</p>
+        <div v-if="session.preview && phaseFiles.some(item=>item.path===session.preview!.path)"><h4>{{session.preview.path}}</h4><pre>{{session.preview.content??session.preview.reason}}</pre></div>
+      </section>
       <div class="composer">
         <label for="research-agent-message">研究问题或补充说明</label>
         <textarea id="research-agent-message" v-model="draft" rows="3" :disabled="readOnly||session.busy||session.stopping||session.status==='interrupt'||session.status==='working'||session.status==='uncertain'" placeholder="例如：请帮助梳理这项调查的研究问题。" />
-        <label class="context-choice"><input v-model="includeContext" type="checkbox" :disabled="readOnly||session.busy" /> 同时发送当前任务的本机赛事、选题和方案草稿</label>
+        <label class="context-choice"><input v-model="includeContext" type="checkbox" :disabled="readOnly||session.busy" /> 同时发送当前阶段相关的本机草稿（未经正式采用）</label>
         <button :disabled="!draft.trim()||readOnly||session.busy||!session.probePassed||session.status==='interrupt'||session.status==='working'||session.status==='uncertain'" @click="send">发送研究消息</button>
       </div>
       <details v-if="session.identity?.runId" class="materials"><summary>会话材料</summary><p>上传到当前智能体会话；上传不代表解析或正式项目保存。</p><input type="file" :disabled="session.busy||readOnly||uploading" aria-label="选择会话材料" @change="chooseFile" /><button :disabled="!selectedFile||session.busy||readOnly||uploading" @click="upload">上传材料</button><button class="secondary" :disabled="session.busy||uploading" @click="loadAttachments">读取附件列表</button><p v-if="attachmentError" class="error" role="alert">{{attachmentError}}</p><ul><li v-for="item in attachments" :key="item.ref">{{item.fileName}} <small>{{item.ref}}</small></li></ul><p v-if="attachments.length">发送消息时会附上这些服务端返回的附件引用。</p></details>
@@ -55,6 +63,7 @@ import {configuredResearchAgent} from '@/config/researchAgent'
 import {currentResearchOwner,useResearchRuns} from '@/stores/researchRuns'
 import {normalizeResearchInterrupt,type ResearchField,type ResearchForm} from '@/api/szRun'
 import {researchDownloadUrl} from '@/api/szArtifacts'
+import {stageArtifacts} from '@/utils/researchStageArtifacts'
 import {uploadAttachment,listAttachments,precheckFile} from '@/api/attachment'
 import type {ArtifactNode,AttachmentItem} from '@/types/sandbox'
 import type {LocalResearchTask} from '@/types/research-contracts'
@@ -78,7 +87,10 @@ function setField(id:string,field:ResearchField,event:Event){const text=(event.t
 function checked(id:string,key:string,option:string){const current=value(id,key);return Array.isArray(current)&&current.includes(option)}
 function toggle(id:string,key:string,option:string){const current=value(id,key),next=Array.isArray(current)?[...current]:[],index=next.indexOf(option);if(index>=0)next.splice(index,1);else next.push(option);answers[id]![key]=next}
 async function submitForms(){await session.submit(answers)}
-async function send(){const text=draft.value.trim();if(!text)return;const source=includeContext.value?'\n\n以下为用户提供的本机草稿，未经正式采用或事实核验：\n'+JSON.stringify({赛事理解:props.task.competition,选题分析:props.task.topicAnalysis,研究方案:props.task.researchPlan}):'';const refs=attachments.value.length?'\n\n本会话已上传材料引用：\n'+attachments.value.map(item=>item.ref).join('\n'):'';await session.start(text+source+refs);if((session.status==='finished'||session.status==='interrupt'||session.status==='awaiting')&&draft.value.trim()===text)draft.value=''}
+const stageName=computed(()=>['赛事理解','选题分析','研究方案','问卷设计与预测试','正式调查','数据分析','报告与答辩'][props.task.viewedPhase])
+const stageHint=computed(()=>props.task.viewedPhase<=2?'G1 建议供人工对照，不覆盖当前编辑，也不代表正式阶段确认。':props.task.viewedPhase===3?'G2 结构化团队题项；请明确请求进入 G2，并按服务端题项表单提交，不自动代填或通过审核。':props.task.viewedPhase===5?'G3 需要 G2 已通过及团队分析计划；接收 CSV/TSV，不接收 XLSX/XLS。本机沙箱另支持 XLSX。':'G4 需要 G3 已通过；产出报告骨架、结果索引和答辩辅助，不代表完整正文。')
+const phaseFiles=computed(()=>stageArtifacts(files.value,session.identity?.projectId||'',props.task.viewedPhase))
+async function send(){const text=draft.value.trim();if(!text)return;const source=includeContext.value?'\n\n以下为用户提供的本机草稿，未经正式采用或事实核验：\n'+JSON.stringify({赛事理解:props.task.competition,选题分析:props.task.topicAnalysis,研究方案:props.task.researchPlan,...(props.task.viewedPhase===3?{团队问卷草稿:props.task.questionnaire}:{}),...(props.task.viewedPhase===5?{本机数据文件元信息:props.task.inputFile,说明:"文件元信息不是上传引用，智能体不可直接读取本机沙箱文件"}:{}),...(props.task.viewedPhase===6?{报告人工草稿:props.task.report}:{})}):'';const refs=attachments.value.length?'\n\n本会话已上传材料引用：\n'+attachments.value.map(item=>item.ref).join('\n'):'';await session.start(text+source+refs);if((session.status==='finished'||session.status==='interrupt'||session.status==='awaiting')&&draft.value.trim()===text)draft.value=''}
 function chooseFile(event:Event){selectedFile.value=(event.target as HTMLInputElement).files?.[0]??null;attachmentError.value=''}
 function currentContext(){return {owner:owner.value,task:props.task.localTaskId,thread:session.identity?.threadId,agent:session.scope?.agentId}}
 function sameContext(c:ReturnType<typeof currentContext>){return owner.value===currentResearchOwner()&&owner.value===c.owner&&props.task.localTaskId===c.task&&session.identity?.threadId===c.thread&&session.scope?.agentId===c.agent}

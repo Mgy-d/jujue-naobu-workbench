@@ -1,7 +1,7 @@
 <template>
   <main class="sandbox-page">
-    <header><RouterLink to="/research/work?mode=analysis">← 返回研究工作台</RouterLink><span>市调演真 · 本机分析服务</span></header>
-    <h1>已有数据分析</h1>
+    <header v-if="!taskId"><RouterLink to="/research/work?mode=analysis">← 返回研究工作台</RouterLink><span>市调演真 · 本机分析服务</span></header>
+    <h1>已有数据分析</h1><p v-if="readOnly" role="status">当前阶段只读；可连接读取已有结果，不能创建、上传、运行或改写结果。</p>
     <p class="intro">上传调查数据并检查字段、描述统计或受限代码运行。结果在本机形成候选版本，正式项目与成果登记待接入。</p>
     <section aria-label="连接服务">
       <h2>连接本机服务</h2>
@@ -11,18 +11,18 @@
     </section>
     <section v-if="connected" aria-label="工作区与输入">
       <h2>工作区与数据</h2>
-      <div class="row"><label>工作区<select :value="workspace?.workspaceId || ''" :disabled="busy || running || offline" @change="chooseWorkspace"><option value="" disabled>选择工作区</option><option v-for="item in workspaces" :key="item.workspaceId" :value="item.workspaceId">{{ item.title }}</option></select></label><label>研究任务<input v-model="title" maxlength="120" :readonly="taskTitle!==undefined" @input="emit('update:taskTitle',title)" /></label><button :disabled="busy || running || offline || !title.trim()" @click="createWorkspace">创建工作区</button></div>
+      <div class="row"><label>工作区<select :value="workspace?.workspaceId || ''" :disabled="readOnly || busy || running || offline" @change="chooseWorkspace"><option value="" disabled>选择工作区</option><option v-for="item in workspaces" :key="item.workspaceId" :value="item.workspaceId">{{ item.title }}</option></select></label><label>研究任务<input v-model="title" maxlength="120" :readonly="taskTitle!==undefined" @input="emit('update:taskTitle',title)" /></label><button :disabled="readOnly || busy || running || offline || !title.trim()" @click="createWorkspace">创建工作区</button></div>
       <p v-if="workspace" class="muted">本机 workspaceId：{{ workspace.workspaceId }} · 业务 projectId 尚未接入</p>
-      <label v-if="workspace" class="upload">选择并上传 CSV / XLSX（最多 10 MiB）<input type="file" accept=".csv,.xlsx" :disabled="busy || running || offline" @change="upload" /></label>
-      <ul class="files"><li v-for="file in workspace?.files || []" :key="file.fileId"><label><input type="checkbox" :value="file.fileId" v-model="selected" :disabled="busy || running || offline" />{{ file.name }} · {{ file.size }} 字节</label><code>{{ file.sandboxPath }}</code><small>SHA-256 {{ file.sha256 }}</small></li></ul>
+      <label v-if="workspace" class="upload">选择并上传 CSV / XLSX（最多 10 MiB）<input type="file" accept=".csv,.xlsx" :disabled="readOnly || busy || running || offline" @change="upload" /></label>
+      <ul class="files"><li v-for="file in workspace?.files || []" :key="file.fileId"><label><input type="checkbox" :value="file.fileId" v-model="selected" :disabled="readOnly || busy || running || offline" />{{ file.name }} · {{ file.size }} 字节</label><code>{{ file.sandboxPath }}</code><small>SHA-256 {{ file.sha256 }}</small></li></ul>
     </section>
     <section v-if="workspace && connected" aria-label="运行任务">
       <h2>运行任务</h2>
-      <div class="row"><label>任务类型<select v-model="kind" :disabled="busy || running || offline"><option value="parse">解析字段与预览</option><option value="statistics">描述统计</option><option value="python">受限 Python</option></select></label><label>超时（秒）<input type="number" v-model.number="timeout" min="1" max="120" :disabled="busy || running || offline" /></label></div>
-      <label v-if="kind==='statistics'">统计列名（逗号分隔；留空检查全部列）<input v-model="columns" :disabled="busy || running || offline" /></label>
-      <label v-if="kind==='python'">Python 代码<textarea v-model="code" rows="10" spellcheck="false" :disabled="busy || running || offline" /></label>
+      <div class="row"><label>任务类型<select v-model="kind" :disabled="readOnly || busy || running || offline"><option value="parse">解析字段与预览</option><option value="statistics">描述统计</option><option value="python">受限 Python</option></select></label><label>超时（秒）<input type="number" v-model.number="timeout" min="1" max="120" :disabled="readOnly || busy || running || offline" /></label></div>
+      <label v-if="kind==='statistics'">统计列名（逗号分隔；留空检查全部列）<input v-model="columns" :disabled="readOnly || busy || running || offline" /></label>
+      <label v-if="kind==='python'">Python 代码<textarea v-model="code" rows="10" spellcheck="false" :disabled="readOnly || busy || running || offline" /></label>
       <p class="muted">输入路径见上方文件清单；结果写到 /work/output，支持 JSON、CSV、TXT、PNG。运行断网，最长 120 秒，内存 512 MiB。</p>
-      <div class="row"><button :disabled="busy || running || offline" @click="start">开始运行</button><button v-if="running" :disabled="busy || offline" @click="cancel">取消运行</button><button v-if="run && !running && run.executionStatus==='succeeded' && run.outputStatus==='failed'" :disabled="busy || offline" @click="retrySave">重试保存本次结果</button></div>
+      <div class="row"><button :disabled="readOnly || busy || running || offline" @click="start">开始运行</button><button v-if="running" :disabled="busy || offline" @click="cancel">取消运行</button><button v-if="!readOnly && run && !running && run.executionStatus==='succeeded' && run.outputStatus==='failed'" :disabled="busy || offline" @click="retrySave">重试保存本次结果</button></div>
     </section>
     <section v-if="run" aria-label="运行结果">
       <h2>运行与保存</h2><p v-if="offline" role="alert">与服务失去连接，当前为最后一次读到的状态；请点击连接恢复核对。</p>
@@ -42,7 +42,7 @@ import { acceptsEvent, isRunning } from '@/utils/research-sandbox-state.js'
 import { createResearchIntakeDraft, loadResearchIntakeDraft, recordSelectedInput, saveResearchIntakeDraft } from '@/utils/research-intake'
 import { sandboxRefKey } from '@/utils/researchDrafts'
 import type { SandboxReference, SelectedInputMetadata } from '@/types/research-contracts'
-const props=defineProps<{taskTitle?:string;taskId?:string;initialSandboxRef?:SandboxReference|null;persistSandboxReference?:(taskId:string,reference:SandboxReference)=>void;persistInputFile?:(taskId:string,file:SelectedInputMetadata)=>void}>()
+const props=defineProps<{taskTitle?:string;taskId?:string;readOnly?:boolean;initialSandboxRef?:SandboxReference|null;persistSandboxReference?:(taskId:string,reference:SandboxReference)=>void;persistInputFile?:(taskId:string,file:SelectedInputMetadata)=>void}>()
 const referenceKey=sandboxRefKey(props.taskId)
 const emit=defineEmits<{ 'update:taskTitle':[value:string]; 'update:inputFile':[value:{name:string;size:number;lastModified:number}|null]; 'update:sandboxRef':[value:SandboxReference] }>()
 const token=ref(sessionStorage.getItem('research-sandbox-token') || '')
@@ -59,7 +59,7 @@ const running=computed(()=>isRunning(run.value))
 const api=()=>sandboxClient(token.value)
 const statusLabel=(value:string)=>({queued:'排队中',running:'执行中',succeeded:'计算完成',failed:'失败',cancelled:'已取消',timed_out:'已超时',interrupted:'已中断',none:'无结果',pending:'等待保存',available:'已保存'}[value] || value)
 async function action(fn:()=>Promise<void>) { busy.value=true; try{await fn()}catch(e){if(e instanceof Error && ['SandboxConnectionError','SandboxAuthenticationError'].includes(e.name)){offline.value=true;if(e.name==='SandboxAuthenticationError')connected.value=false}feedback.value=e instanceof Error?e.message:'操作失败'}finally{busy.value=false} }
-function remember() { if(!workspace.value)return;const reference={workspaceId:workspace.value.workspaceId,runId:run.value?.runId || null};if(props.taskId&&props.persistSandboxReference){props.persistSandboxReference(props.taskId,reference)}else if(props.taskId){emit('update:sandboxRef',reference)}else{localStorage.setItem(referenceKey,JSON.stringify(reference))} }
+function remember() { if(props.readOnly||!workspace.value)return;const reference={workspaceId:workspace.value.workspaceId,runId:run.value?.runId || null};if(props.taskId&&props.persistSandboxReference){props.persistSandboxReference(props.taskId,reference)}else if(props.taskId){emit('update:sandboxRef',reference)}else{localStorage.setItem(referenceKey,JSON.stringify(reference))} }
 function clearPolling(){ generation++; if(timer)clearTimeout(timer) }
 async function poll(epoch:number) {
   const current=run.value; if(disposed || !current || epoch!==generation)return
@@ -79,12 +79,12 @@ async function connect(){await action(async()=>{
   workspace.value=null;run.value=null;selected.value=[]
   if(saved && list.some(w=>w.workspaceId===saved.workspaceId)){workspace.value=await api().workspace(saved.workspaceId);if(saved.runId)await restoreRun(saved.runId)}
 })}
-async function chooseWorkspace(event:Event){await action(async()=>{clearPolling();run.value=null;events.value=[];selected.value=[];workspace.value=await api().workspace((event.target as HTMLSelectElement).value);remember()})}
-async function createWorkspace(){await action(async()=>{clearPolling();intakeDraft.value={...intakeDraft.value,title:title.value.trim(),updatedAt:Date.now()};if(!props.taskId)intakeDraft.value=saveResearchIntakeDraft(localStorage,intakeDraft.value);workspace.value=await api().create(title.value.trim());run.value=null;selected.value=[];remember();workspaces.value=await api().workspaces();feedback.value='本机工作区已创建。'})}
-async function upload(event:Event){const input=event.target as HTMLInputElement;const file=input.files?.[0];if(!file || !workspace.value)return;await action(async()=>{if(file.size>10*1024*1024)throw new Error('文件超过 10 MiB。');intakeDraft.value=recordSelectedInput({...intakeDraft.value,title:title.value},file);if(!props.taskId)intakeDraft.value=saveResearchIntakeDraft(localStorage,intakeDraft.value);const added=await api().upload(workspace.value!.workspaceId,file);workspace.value=await api().workspace(workspace.value!.workspaceId);selected.value=[added.fileId];if(props.taskId&&props.persistInputFile&&intakeDraft.value.inputFile){props.persistInputFile(props.taskId,intakeDraft.value.inputFile)}else{emit('update:inputFile',intakeDraft.value.inputFile)};feedback.value='调查数据已上传至本机沙箱，草稿仅保存文件元数据。'});input.value=''}
-async function start(){await action(async()=>{if(!workspace.value)return;if(kind.value!=='python' && selected.value.length!==1)throw new Error('解析或统计请只选择一份数据文件。');if(selected.value.length>10)throw new Error('一次最多选择 10 份文件。');clearPolling();run.value=await api().start(workspace.value.workspaceId,{kind:kind.value,fileIds:selected.value,code:kind.value==='python'?code.value:'',columns:kind.value==='statistics'?columns.value.split(/[,，]/).map(x=>x.trim()).filter(Boolean):[],timeoutSeconds:timeout.value},crypto.randomUUID());events.value=[];sequence=0;offline.value=false;remember();feedback.value='任务已登记。';void poll(generation)})}
-async function cancel(){await action(async()=>{if(run.value){await api().cancel(run.value.runId);feedback.value='已请求取消，正在核对实际终止状态。';void poll(generation)}})}
-async function retrySave(){await action(async()=>{if(run.value){run.value=await api().commit(run.value.runId);feedback.value='本次结果保存状态已更新。';void poll(generation)}})}
+async function chooseWorkspace(event:Event){if(props.readOnly)return;await action(async()=>{clearPolling();run.value=null;events.value=[];selected.value=[];workspace.value=await api().workspace((event.target as HTMLSelectElement).value);remember()})}
+async function createWorkspace(){if(props.readOnly)return;await action(async()=>{clearPolling();intakeDraft.value={...intakeDraft.value,title:title.value.trim(),updatedAt:Date.now()};if(!props.taskId)intakeDraft.value=saveResearchIntakeDraft(localStorage,intakeDraft.value);workspace.value=await api().create(title.value.trim());run.value=null;selected.value=[];remember();workspaces.value=await api().workspaces();feedback.value='本机工作区已创建。'})}
+async function upload(event:Event){if(props.readOnly)return;const input=event.target as HTMLInputElement;const file=input.files?.[0];if(!file || !workspace.value)return;await action(async()=>{if(file.size>10*1024*1024)throw new Error('文件超过 10 MiB。');intakeDraft.value=recordSelectedInput({...intakeDraft.value,title:title.value},file);if(!props.taskId)intakeDraft.value=saveResearchIntakeDraft(localStorage,intakeDraft.value);const added=await api().upload(workspace.value!.workspaceId,file);workspace.value=await api().workspace(workspace.value!.workspaceId);selected.value=[added.fileId];if(props.taskId&&props.persistInputFile&&intakeDraft.value.inputFile){props.persistInputFile(props.taskId,intakeDraft.value.inputFile)}else{emit('update:inputFile',intakeDraft.value.inputFile)};feedback.value='调查数据已上传至本机沙箱，草稿仅保存文件元数据。'});input.value=''}
+async function start(){if(props.readOnly)return;await action(async()=>{if(!workspace.value)return;if(kind.value!=='python' && selected.value.length!==1)throw new Error('解析或统计请只选择一份数据文件。');if(selected.value.length>10)throw new Error('一次最多选择 10 份文件。');clearPolling();run.value=await api().start(workspace.value.workspaceId,{kind:kind.value,fileIds:selected.value,code:kind.value==='python'?code.value:'',columns:kind.value==='statistics'?columns.value.split(/[,，]/).map(x=>x.trim()).filter(Boolean):[],timeoutSeconds:timeout.value},crypto.randomUUID());events.value=[];sequence=0;offline.value=false;remember();feedback.value='任务已登记。';void poll(generation)})}
+async function cancel(){if(props.readOnly)return;await action(async()=>{if(run.value){await api().cancel(run.value.runId);feedback.value='已请求取消，正在核对实际终止状态。';void poll(generation)}})}
+async function retrySave(){if(props.readOnly)return;await action(async()=>{if(run.value){run.value=await api().commit(run.value.runId);feedback.value='本次结果保存状态已更新。';void poll(generation)}})}
 async function download(item:SandboxArtifact){await action(async()=>{if(!run.value)return;const blob=await api().download(run.value.runId,item);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=item.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);feedback.value='固定版本已校验并下载。'})}
 onMounted(()=>{if(token.value)void connect()});onUnmounted(()=>{disposed=true;clearPolling()})
 </script>

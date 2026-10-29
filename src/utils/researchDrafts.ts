@@ -14,10 +14,10 @@ export function kindToMode(kind: WorkflowKind) { return kind === 'dataset-analys
 export function workflowLabel(kind: WorkflowKind) { return kind === 'dataset-analysis' ? '已有答卷／数据分析' : kind === 'questionnaire-review' ? '已有问卷核对' : '完整研究'; }
 export function emptyCompetitionDraft(): CompetitionDraft { return { background: '', edition: '', group: '', requirements: [], sources: [], unknowns: [] }; }
 export function createLocalTask(workflowKind: WorkflowKind, localTaskId = 'local-' + crypto.randomUUID(), now = Date.now()): LocalResearchTask {
-    return { schemaVersion: 1, localTaskId, workflowKind, title: workflowKind === 'full-study' ? '新的完整研究' : workflowKind === 'questionnaire-review' ? '新的问卷核对' : '新的数据分析任务', viewedPhase: 0, revision: 0, createdAt: now, updatedAt: now, savedAt: null, inputFile: null, sandboxRef: null, competition: emptyCompetitionDraft(), topicAnalysis: emptyTopicAnalysisDraft(), researchPlan: emptyResearchPlanDraft(), questionnaire: emptyQuestionnaireDraft() };
+    return { schemaVersion: 1, localTaskId, workflowKind, title: workflowKind === 'full-study' ? '新的完整研究' : workflowKind === 'questionnaire-review' ? '新的问卷核对' : '新的数据分析任务', viewedPhase: 0, revision: 0, createdAt: now, updatedAt: now, savedAt: null, inputFile: null, sandboxRef: null, competition: emptyCompetitionDraft(), topicAnalysis: emptyTopicAnalysisDraft(), researchPlan: emptyResearchPlanDraft(), questionnaire: emptyQuestionnaireDraft(), collection: emptyCollectionDraft(), report: emptyReportDraft() };
 }
 export function matchesDraftContext(task: LocalResearchTask, context: DraftContext) { return task.localTaskId === context.localTaskId && task.revision === context.revision; }
-export function editLocalTask(task: LocalResearchTask, patch: Partial<Pick<LocalResearchTask, 'title' | 'competition' | 'topicAnalysis' | 'researchPlan' | 'questionnaire' | 'inputFile' | 'sandboxRef' | 'viewedPhase'>>, now = Date.now()): LocalResearchTask {
+export function editLocalTask(task: LocalResearchTask, patch: Partial<Pick<LocalResearchTask, 'title' | 'competition' | 'topicAnalysis' | 'researchPlan' | 'questionnaire' | 'inputFile' | 'sandboxRef' | 'viewedPhase' | 'collection' | 'report'>>, now = Date.now()): LocalResearchTask {
     return { ...task, ...patch, revision: task.revision + 1, updatedAt: now, savedAt: null };
 }
 export interface TaskRegistry {
@@ -60,7 +60,16 @@ export function applyQuestionnaireUpdate(task:LocalResearchTask,event:Questionna
  const clean=normalizeQuestionnaireDraft(event.draft);
  return clean?{ok:true,value:editLocalTask(task,{questionnaire:clean},now)}:{ok:false,error:{code:'MISSING_INPUT',message:'问卷草稿格式无效，当前编辑未替换。'}};
 }
+export function emptyCollectionDraft(){return {channel:'',audience:'',startNote:'',stopRule:''}}
+export function emptyReportDraft(){return {body:'',defenseNotes:'',sourceNotes:''}}
+function stringDraft<T extends Record<string,string>>(value:unknown,empty:T):T|null {
+ if(value===undefined)return empty;
+ if(!value||typeof value!=='object'||Object.keys(empty).some(k=>typeof (value as Record<string,unknown>)[k]!=='string'))return null;
+ return Object.fromEntries(Object.keys(empty).map(k=>[k,(value as T)[k]])) as T;
+}
 function cleanTask(v: any): LocalResearchTask | null {
+    const collection=stringDraft(v?.collection,emptyCollectionDraft()),report=stringDraft(v?.report,emptyReportDraft());
+    if(!collection||!report)return null;
     const competition = normalizeCompetitionDraft(v?.competition);
     const topicAnalysis = v?.topicAnalysis === undefined ? emptyTopicAnalysisDraft() : normalizeTopicAnalysisDraft(v.topicAnalysis);
     const researchPlan = v?.researchPlan === undefined ? emptyResearchPlanDraft() : normalizeResearchPlanDraft(v.researchPlan);
@@ -69,9 +78,9 @@ function cleanTask(v: any): LocalResearchTask | null {
     if (!v || v.schemaVersion !== 1 || typeof v.localTaskId !== 'string' || !v.localTaskId || typeof v.title !== 'string' || !kinds.includes(v.workflowKind) || !Number.isInteger(v.viewedPhase) || v.viewedPhase < 0 || v.viewedPhase >= stagesFor(v.workflowKind).length || !Number.isInteger(v.revision) || v.revision < 0 || !Number.isFinite(v.createdAt) || !Number.isFinite(v.updatedAt) || (v.savedAt !== null && !Number.isFinite(v.savedAt)) || !competition)
         return null;
     const inputFile = v.inputFile == null ? null : validFile(v.inputFile), sandboxRef = v.sandboxRef == null ? null : validRef(v.sandboxRef);
-    if ((v.inputFile != null && !inputFile) || (v.sandboxRef != null && !sandboxRef) || (v.workflowKind !== 'dataset-analysis' && (inputFile || sandboxRef)))
+    if ((v.inputFile != null && !inputFile) || (v.sandboxRef != null && !sandboxRef) || (!['dataset-analysis','full-study'].includes(v.workflowKind) && (inputFile || sandboxRef)))
         return null;
-    return { schemaVersion: 1, localTaskId: v.localTaskId, workflowKind: v.workflowKind, title: v.title, viewedPhase: v.viewedPhase, revision: v.revision, createdAt: v.createdAt, updatedAt: v.updatedAt, savedAt: v.savedAt, inputFile, sandboxRef, competition, topicAnalysis, researchPlan, questionnaire };
+    return { schemaVersion: 1, localTaskId: v.localTaskId, workflowKind: v.workflowKind, title: v.title, viewedPhase: v.viewedPhase, revision: v.revision, createdAt: v.createdAt, updatedAt: v.updatedAt, savedAt: v.savedAt, inputFile, sandboxRef, competition, topicAnalysis, researchPlan, questionnaire, collection, report };
 }
 function parseRegistry(raw: string): TaskRegistry {
     const v = JSON.parse(raw);

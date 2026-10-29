@@ -107,6 +107,8 @@ export interface SandboxReference {
     workspaceId: string;
     runId?: string | null;
 }
+export interface CollectionDraft { channel:string; audience:string; startNote:string; stopRule:string }
+export interface ReportDraft { body:string; defenseNotes:string; sourceNotes:string }
 export interface LocalResearchTask {
     schemaVersion: 1;
     localTaskId: string;
@@ -123,6 +125,8 @@ export interface LocalResearchTask {
     topicAnalysis: TopicAnalysisDraft;
     researchPlan: ResearchPlanDraft;
     questionnaire: QuestionnaireDraft;
+    collection: CollectionDraft;
+    report: ReportDraft;
 }
 export interface ResearchFailure {
     code: 'CAPABILITY_UNAVAILABLE' | 'PERSIST_FAILED' | 'STALE_BASELINE' | 'PHASE_LOCKED' | 'UNAUTHORIZED' | 'MISSING_INPUT';

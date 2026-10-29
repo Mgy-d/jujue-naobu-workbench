@@ -35,7 +35,7 @@ export const useResearchStore = defineStore('research-tasks', () => {
         return draft.value;
     }
     function create(kind: WorkflowKind) { keep(); draft.value = createLocalTask(kind); keep(); registry.value.lastByKind[kind] = draft.value.localTaskId; save(); return draft.value; }
-    function update(patch: Partial<Pick<LocalResearchTask, 'title' | 'competition' | 'topicAnalysis' | 'researchPlan' | 'questionnaire' | 'inputFile' | 'sandboxRef' | 'viewedPhase'>>) { if (!draft.value)
+    function update(patch: Partial<Pick<LocalResearchTask, 'title' | 'competition' | 'topicAnalysis' | 'researchPlan' | 'questionnaire' | 'inputFile' | 'sandboxRef' | 'viewedPhase' | 'collection' | 'report'>>) { if (!draft.value)
         return; draft.value = editLocalTask(draft.value, patch); feedback.value = '有未保存的本机编辑。'; keep(); }
     function updateCompetition(event: {
         context: DraftContext;
@@ -64,7 +64,7 @@ export const useResearchStore = defineStore('research-tasks', () => {
     }
     function persistTaskPatch(localTaskId: string, patch: Partial<Pick<LocalResearchTask, 'sandboxRef' | 'inputFile'>>) {
         const previous = registry.value.tasks[localTaskId];
-        if (!previous || previous.workflowKind !== 'dataset-analysis')
+        if (!previous || !['dataset-analysis','full-study'].includes(previous.workflowKind))
             return;
         if (patch.sandboxRef && previous.sandboxRef?.workspaceId === patch.sandboxRef.workspaceId && previous.sandboxRef?.runId === patch.sandboxRef.runId)
             return;
