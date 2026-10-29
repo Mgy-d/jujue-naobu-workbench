@@ -14,3 +14,11 @@
 实现：src/api/szRun.ts 的 successfulResearchHitlIds、src/stores/researchRuns.ts 的 recheckBlocked、ResearchAgentPanel.vue 按钮。单元回归位于 tests/research-agent-session.test.mjs。
 
 本轮验证：241项前端测试通过，类型检查/构建与 DOM 契约检查通过；真实构建页面配合 Mock 响应验证缺失记录拦截、成功核对、保留提交编号、刷新恢复以及全程仅 GET。真实后端异常恢复尚未通过：审核登记候选补丁未应用，原临时测试库停止后丢失。此功能不恢复丢失数据库、不代替后端修复。
+
+## 正式联调边界
+
+原厂平台 Java 与框架不属于本项目修改范围。隔离平台补丁只保留为定位材料，退出实施计划；真实联调以团队交付的未修改版本及推荐配置为基线。发现平台缺陷，通过现有支持接口验证恢复；不能安全恢复时交平台维护方提供修复版本。
+
+DELETE 单条 form-interrupts 只删除平台登记，不能据此证明框架中断已消费。POST recover 会重建 AgentState 并移除陈旧 ASKING 调用，不直接等同于本次异常的安全恢复，也不构成阶段确认。未验证前不得自动调用这些接口解除保护。
+
+本机数据库使用独立持久化配置，单独验收容器停止/启动后的记录读回。源码一致、构建成功、Compose 配置有效和真实运行通过分别记录；带临时补丁的历史结果不作为未修改版本验收。
