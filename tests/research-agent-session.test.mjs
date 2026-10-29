@@ -8,6 +8,34 @@ function fixture(){const map=new Map();return {getItem:k=>map.get(k)??null,setIt
 const scope={ownerId:'owner',agentId:'agent',taskId:'A'}
 const gate={id:'reply:call1',toolCallId:'call1',metadata:{toolName:'ui_gate',toolInput:{title:'审批'}}}
 function deps(){return {verify:async()=>{},run:async()=>({status:'success',message:'',texts:{a:'你好'},interrupts:[]}),transcript:async()=>({messages:[]}),pending:async()=>[],runStatus:async()=>({running:false,pendingWork:false}),register:async()=>{},remove:async()=>{},tree:async()=>[],read:async()=>({path:'',content:''})}}
+const successfulGateMessages=[{id:'call',role:'assistant',content:[{type:'tool_call',id:'call1',name:'ui_gate'}]},{id:'result',role:'assistant',content:[{type:'tool_result',id:'call1',state:'success'}]}]
+async function blockedSession(){
+  const {ResearchRunSession}=await subject(),d=deps(),storage=fixture();let writes=0
+  d.run=async()=>{writes++;return {status:'interrupt',message:'',texts:{},interrupts:[gate]}}
+  const s=new ResearchRunSession(storage,d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究')
+  s.identity.submittedIds=[gate.id];d.pending=async()=>[gate];await s.recover()
+  d.run=async()=>{writes++;throw Error('must not send')};d.remove=async()=>{writes++;throw Error('must not delete')};d.register=async()=>{writes++;throw Error('must not register')}
+  d.pending=async()=>[];d.live=async()=>[];d.transcript=async()=>({messages:successfulGateMessages})
+  return {s,d,storage,writes:()=>writes,ResearchRunSession}
+}
+test('explicit blocked recheck verifies durable success, preserves submission history and survives reload without writes',async()=>{
+  const {s,d,storage,writes,ResearchRunSession}=await blockedSession();await s.recheckBlocked()
+  assert.equal(s.halted,false);assert.equal(s.status,'finished');assert.deepEqual(s.identity.submittedIds,[gate.id]);assert.deepEqual(s.identity.pendingIds,[]);assert.equal(writes(),1)
+  const restored=new ResearchRunSession(storage,d,()=> 'owner');await restored.select(scope);assert.equal(restored.halted,false);assert.equal(restored.identity.threadId,s.identity.threadId);assert.equal(writes(),1)
+})
+test('blocked recheck refuses missing, failed, running, ambiguous or reversed approval evidence',async()=>{
+  for(const messages of [[],[successfulGateMessages[0]], [successfulGateMessages[0],{...successfulGateMessages[1],content:[{type:'tool_result',id:'call1',state:'error'}]}],[successfulGateMessages[0],{...successfulGateMessages[1],content:[{type:'tool_result',id:'call1',state:'running'}]}],[...successfulGateMessages,successfulGateMessages[0]],[...successfulGateMessages].reverse()]){
+    const {s,d,writes}=await blockedSession();d.transcript=async()=>({messages});await s.recheckBlocked();assert.equal(s.halted,true);assert.equal(s.identity.status,'blocked');assert.equal(writes(),1)
+  }
+})
+test('blocked recheck preserves old and new pending gates and requires live registry and idle service',async()=>{
+  for(const mutate of [d=>d.pending=async()=>[gate],d=>d.pending=async()=>[{...gate,id:'new:call2',toolCallId:'call2'}],d=>d.live=async()=>[gate.id],d=>d.live=async()=>null,d=>d.runStatus=async()=>({running:true}),d=>d.transcript=async()=>{throw Error('404 session missing')},d=>d.runStatus=async()=>({running:false,pendingWork:true})]){
+    const {s,d,writes}=await blockedSession();mutate(d);await s.recheckBlocked();assert.equal(s.halted,true);assert.equal(s.identity.status,'blocked');assert.equal(writes(),1);assert.equal(s.busy,false)
+  }
+})
+test('blocked recheck does not unlock another task from a late response',async()=>{
+  const {s,d}=await blockedSession();let release;d.transcript=()=>new Promise(resolve=>release=resolve);const pending=s.recheckBlocked();await s.select({...scope,taskId:'B'});release({messages:successfulGateMessages});await pending;assert.equal(s.scope.taskId,'B');assert.equal(s.identity,null)
+})
 test('the model probe must get an explicit successful text before real research starts',async()=>{const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);await s.start('选题');assert.match(s.error,/先测试模型/);assert.equal(s.identity,null);await s.probe();assert.equal(s.probePassed,true);await s.start('选题');assert.equal(s.status,'finished');assert.equal(s.identity.taskId,'A')})
 test('switching task invalidates late events and does not write them into the new task',async()=>{const {ResearchRunSession}=await subject(),d=deps();let finish,events;d.run=async(i,r,onEvent)=>{events=onEvent;return new Promise(resolve=>finish=resolve)};const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;const active=s.start('A');await new Promise(resolve=>setTimeout(resolve,0));await s.select({...scope,taskId:'B'});events({type:'TEXT_MESSAGE_CONTENT',messageId:'late',delta:'old A'});finish({status:'success',message:'',texts:{late:'old A'},interrupts:[]});await active;assert.equal(s.identity,null);assert.equal(s.scope.taskId,'B');assert.deepEqual(s.messages,[])})
 test('the original run is saved before sending and a failed submission cannot claim the form was consumed',async()=>{const {ResearchRunSession}=await subject(),d=deps(),calls=[];d.run=async(i,r)=>{calls.push({i:structuredClone(i),r:structuredClone(r)});if(calls.length===1)return {status:'interrupt',message:'',texts:{},interrupts:[gate]};throw Error('network')};d.pending=async()=>[gate];const storage=fixture(),s=new ResearchRunSession(storage,d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');const original=s.identity.runId;assert.equal(s.status,'interrupt');await s.submit({'reply:call1':{decision:'通过',feedback:''}});assert.equal(calls[1].r.runId,original);assert.equal(calls[1].r.threadId,s.identity.threadId);assert.equal(s.status,'uncertain');assert.match(s.error,/核对/);assert.deepEqual(s.identity.submittedIds,['reply:call1']);assert.equal(calls.length,2);await s.submit({'reply:call1':{decision:'通过',feedback:''}});assert.equal(calls.length,2)})

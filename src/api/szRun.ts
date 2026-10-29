@@ -3,6 +3,19 @@ import { gateFromInterrupts } from '@/utils/analysis/gate'
 import type { AguiEvent, AguiInterrupt, AguiResumeItem, AguiRunRequest } from '@/types/agui'
 
 export interface ResearchIdentity { agentId: string; projectId: string; threadId: string; runId: string }
+/** Strict evidence for unlocking a blocked session, not evidence of stage approval. */
+export function successfulResearchHitlIds(messages: unknown[]): Set<string> {
+  const calls=new Map<string,{count:number;index:number;hitl:boolean}>(), results=new Map<string,number>()
+  for(const [index,raw] of messages.entries()){
+    const msg=object(raw);if(!msg || !Array.isArray(msg.content))continue
+    for(const rawBlock of msg.content){
+      const b=object(rawBlock);if(!b || typeof b.id!=='string' || !b.id)continue
+      if(b.type==='tool_call')calls.set(b.id,{count:(calls.get(b.id)?.count||0)+1,index,hitl:msg.role==='assistant' && (b.name==='ui_gate'||b.name==='ui_form_advanced')})
+      if(b.type==='tool_result' && b.state==='success')results.set(b.id,index)
+    }
+  }
+  return new Set([...calls].filter(([id,c])=>c.count===1 && c.hitl && (results.get(id)??-1)>=c.index).map(([id])=>id))
+}
 export type ResearchRunStatus = 'running' | 'success' | 'interrupt' | 'error' | 'uncertain'
 export interface ResearchField {
   key: string; label: string; kind: string; options: string[]; required: boolean

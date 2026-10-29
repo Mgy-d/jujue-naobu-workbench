@@ -7,7 +7,7 @@
     <template v-else>
       <div class="top-actions">
         <button :disabled="session.busy || session.stopping || readOnly || session.halted" @click="session.probe()">测试模型响应</button>
-        <button v-if="session.identity?.runId" :disabled="session.busy || session.stopping || session.halted" class="secondary" @click="session.recover()">恢复／核对会话</button>
+        <button v-if="session.identity?.runId" :disabled="session.busy || session.stopping" class="secondary" @click="session.halted ? session.recheckBlocked() : session.recover()">{{ session.halted ? '重新核对异常会话' : '恢复／核对会话' }}</button>
         <button v-if="session.busy" class="secondary" @click="session.stop()">停止本页接收</button>
         <button v-if="session.identity && (session.status==='running'||session.status==='working')" class="secondary" :disabled="session.stopping" @click="session.stopServer()">请求停止服务端运行</button>
       </div>

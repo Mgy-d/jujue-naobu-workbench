@@ -1,4 +1,4 @@
-import { buildResearchRequest, matchingBackgroundRuns, normalizeResearchInterrupt, reconcileResearchPending, streamResearchRun } from '@/api/szRun'
+import { buildResearchRequest, matchingBackgroundRuns, normalizeResearchInterrupt, reconcileResearchPending, streamResearchRun, successfulResearchHitlIds } from '@/api/szRun'
 import { reactive, markRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { getAccessToken } from '@/api/http'
@@ -187,6 +187,30 @@ export class ResearchRunSession {
       await this.applyResult(epoch,result,previous)
     } catch(e){if(!this.active(epoch))return;if(issued){this.status='uncertain';this.error='提交结果未确认，请先恢复会话核对，不要重复提交。'+description(e);if(this.identity)try{this.persist({...this.identity,status:'uncertain'})}catch{}}else{this.status='interrupt';this.error=description(e)}}
     finally{if(this.active(epoch)){this.busy=false;this.controller=null}}
+  }
+  /** Explicit read-only recheck after service repair. Never resubmit or delete a gate here. */
+  async recheckBlocked() {
+    if(!this.halted || !this.scope || !this.identity || this.busy || this.stopping)return
+    const epoch=this.epoch,scope={...this.scope},identity={...this.identity}
+    this.busy=true;this.error='';this.notice='正在核对已保存的审核结果和服务端登记。'
+    let verified=false
+    try {
+      const [transcript,pending,status,live]=await Promise.all([
+        this.services.transcript(scope.agentId,identity.threadId),this.services.pending(scope.agentId,identity.threadId),
+        this.services.runStatus(scope.agentId,identity.threadId),this.services.live?.(scope.agentId,identity.threadId)??Promise.resolve(null),
+      ])
+      if(!this.active(epoch))return
+      if(status.running || status.pendingWork)throw Error('服务端仍在处理，请稍后再核对。')
+      if(live===null)throw Error('服务端未提供可核对的实时审核登记，暂不能解除保护。')
+      if(pending.length || live.length)throw Error('服务端仍有待答审核，请由平台核查后再恢复；未重新提交。')
+      const ids=[...new Set([...identity.submittedIds,...identity.pendingIds])]
+      const successful=successfulResearchHitlIds(transcript.messages)
+      if(!ids.length || ids.some(id=>!successful.has(id.split(':').slice(1).join(':'))))throw Error('未找到全部原审核的成功记录，保护仍保留；空登记不能证明审核已完成。')
+      this.persist({...identity,status:'uncertain',pendingIds:[]})
+      this.halted=false;verified=true
+    } catch(e){if(this.active(epoch)){this.error=description(e);this.notice='';this.status='uncertain'}}
+    finally{if(this.active(epoch))this.busy=false}
+    if(verified && this.active(epoch))await this.recover()
   }
   async recover() {
     if(!this.scope || !this.identity || !this.identity.runId || this.busy || this.stopping || this.halted)return
