@@ -89,3 +89,35 @@ test('incomplete, conflicting, mismatched or failed background tool lifecycles c
 
 test('WAIT_HITL with no registered or unresolved gate is waiting for a user message, not failed approval',async()=>{const {ResearchRunSession}=await subject(),d=deps();let calls=0;d.run=async()=>{calls++;return {status:'success',message:'',texts:{a:'本轮G1通过，等待是否进入G2'},interrupts:[]}};d.runStatus=async()=>({running:false,awaitingInput:true});const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');assert.equal(s.status,'awaiting');assert.equal(s.error,'');await s.recover();assert.equal(s.status,'awaiting');await s.start('补充说明');assert.equal(calls,2)})
 test('a known unresolved gate missing from registration cannot degrade to ordinary input',async()=>{const {ResearchRunSession}=await subject(),d=deps();d.run=async()=>({status:'interrupt',message:'',texts:{},interrupts:[gate]});const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');d.runStatus=async()=>({running:false,awaitingInput:true});await s.recover();assert.equal(s.status,'uncertain');assert.match(s.error,/待答表单/);assert.equal(s.identity.pendingIds[0],gate.id)})
+
+
+test('submitted gate is cleaned from durable evidence before stream completion; duplicate checks share one request',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),storage=fixture();let finish,reads=0,removed=[];
+ d.run=async()=>({status:'interrupt',message:'',texts:{},interrupts:[gate]});d.pending=async()=>[gate];
+ const s=new ResearchRunSession(storage,d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('synthetic');
+ d.run=()=>new Promise(resolve=>finish=resolve);const submitting=s.submit({'reply:call1':{decision:'通过'}});await new Promise(r=>setTimeout(r,0));
+ d.transcript=async()=>{reads++;return {messages:successfulGateMessages}};d.remove=async(a,t,id)=>removed.push(id);
+ await Promise.all([s.reconcileSubmitted(),s.reconcileSubmitted()]);assert.equal(reads,1);assert.deepEqual(removed,['call1']);assert.equal(s.identity.status,'submitting');assert.equal(s.busy,true);
+ finish({status:'uncertain',message:'synthetic disconnect',texts:{},interrupts:[]});await submitting;
+});
+test('reconciliation never clears an unaccepted, timeout or conflicting submission, or clears another gate',async()=>{
+ const {ResearchRunSession}=await subject();
+ for(const messages of [[],[{...successfulGateMessages[1],content:[{type:'tool_result',id:'call1',state:'success',output:'[HITL_TIMEOUT]'}]}], [...successfulGateMessages,successfulGateMessages[1]]]){
+  const d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');let removed=0;
+  d.run=async()=>({status:'interrupt',message:'',texts:{},interrupts:[gate]});d.pending=async()=>[gate];await s.select(scope);s.probePassed=true;await s.start('synthetic');d.run=async()=>{throw Error('synthetic network')};await s.submit({'reply:call1':{decision:'通过'}});
+  d.transcript=async()=>({messages});d.remove=async()=>{removed++};await s.reconcileSubmitted();assert.equal(removed,0);assert.equal(s.status,'uncertain');
+ }
+});
+test('late reconciliation cannot remove a gate after switching tasks',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');let complete,removed=0;
+ d.run=async()=>({status:'interrupt',message:'',texts:{},interrupts:[gate]});d.pending=async()=>[gate];await s.select(scope);s.probePassed=true;await s.start('synthetic');d.run=async()=>{throw Error('synthetic network')};await s.submit({'reply:call1':{decision:'通过'}});
+ d.transcript=()=>new Promise(resolve=>complete=resolve);d.remove=async()=>{removed++};const checking=s.reconcileSubmitted();await s.select({...scope,taskId:'B'});complete({messages:successfulGateMessages});await checking;assert.equal(removed,0);assert.equal(s.scope.taskId,'B');
+});
+
+
+test('empty pending cannot hide contradictory or timed-out results during ordinary recovery',async()=>{
+ const {ResearchRunSession}=await subject();
+ for(const messages of [[...successfulGateMessages,successfulGateMessages[1]],[successfulGateMessages[0],{...successfulGateMessages[1],content:[{type:'tool_result',id:'call1',state:'success',output:[{type:'text',text:'[HITL_TIMEOUT]'}]}]}]]){
+  const d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');d.run=async()=>({status:'interrupt',message:'',texts:{},interrupts:[gate]});d.pending=async()=>[gate];await s.select(scope);s.probePassed=true;await s.start('synthetic');d.run=async()=>{throw Error('synthetic network')};await s.submit({'reply:call1':{decision:'通过'}});d.pending=async()=>[];d.transcript=async()=>({messages});d.runStatus=async()=>({running:false,awaitingInput:true});await s.recover();assert.equal(s.halted,true);assert.equal(s.status,'uncertain');assert.match(s.error,/冲突|超时/);assert.equal(s.busy,false);
+ }
+});

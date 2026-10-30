@@ -11,10 +11,23 @@ export function successfulResearchHitlIds(messages: unknown[]): Set<string> {
     for(const rawBlock of msg.content){
       const b=object(rawBlock);if(!b || typeof b.id!=='string' || !b.id)continue
       if(b.type==='tool_call')calls.set(b.id,{count:(calls.get(b.id)?.count||0)+1,index,hitl:msg.role==='assistant' && (b.name==='ui_gate'||b.name==='ui_form_advanced')})
-      if(b.type==='tool_result')results.set(b.id,{count:(results.get(b.id)?.count||0)+1,index,success:b.state==='success' && !String(b.output??'').includes('[HITL_TIMEOUT]')})
+      if(b.type==='tool_result')results.set(b.id,{count:(results.get(b.id)?.count||0)+1,index,success:b.state==='success' && !JSON.stringify(b.output??'').includes('[HITL_TIMEOUT]')})
     }
   }
   return new Set([...calls].filter(([id,c])=>{const r=results.get(id);return c.count===1 && c.hitl && r?.count===1 && r.success && r.index>=c.index}).map(([id])=>id))
+}
+/** Contradictory results remain an error even when the pending registry is empty. */
+export function conflictingResearchHitlIds(messages: unknown[]): Set<string> {
+  const count=new Map<string,number>(), conflicts=new Set<string>()
+  for(const raw of messages){
+    const msg=object(raw);if(!msg || !Array.isArray(msg.content))continue
+    for(const value of msg.content){
+      const b=object(value);if(!b || b.type!=='tool_result' || typeof b.id!=='string')continue
+      const n=(count.get(b.id)||0)+1;count.set(b.id,n)
+      if(n>1 || JSON.stringify(b.output??'').includes('[HITL_TIMEOUT]'))conflicts.add(b.id)
+    }
+  }
+  return conflicts
 }
 export type ResearchRunStatus = 'running' | 'success' | 'interrupt' | 'error' | 'uncertain'
 export interface ResearchField {

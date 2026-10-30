@@ -1,4 +1,4 @@
-import { buildResearchRequest, matchingBackgroundRuns, normalizeResearchInterrupt, reconcileResearchPending, streamResearchRun, successfulResearchHitlIds } from '@/api/szRun'
+import { buildResearchRequest, matchingBackgroundRuns, normalizeResearchInterrupt, reconcileResearchPending, streamResearchRun, successfulResearchHitlIds, conflictingResearchHitlIds } from '@/api/szRun'
 import { reactive, markRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { getAccessToken } from '@/api/http'
@@ -131,7 +131,7 @@ export class ResearchRunSession {
     return true
   }
   private async applyResult(epoch:number,result:ResearchRunResult,submitted:AguiInterrupt[]) {
-    if(!this.active(epoch) || !this.identity || !this.scope)return
+    if(!this.active(epoch) || this.halted || !this.identity || !this.scope)return
     for(const [id,text] of Object.entries(result.texts)){const existing=this.messages.find(m=>m.id===id && m.role==='assistant');if(existing)existing.text=text;else if(text)this.messages.push({id,role:'assistant',text})}
     if(result.status==='interrupt') {
       const ids=result.interrupts.map(idOf)
@@ -191,6 +191,38 @@ export class ResearchRunSession {
     } catch(e){if(!this.active(epoch))return;if(issued){this.status='uncertain';this.error='提交结果未确认，请先恢复会话核对，不要重复提交。'+description(e);if(this.identity)try{this.persist({...this.identity,status:'uncertain'})}catch{}}else{this.status='interrupt';this.error=description(e)}}
     finally{if(this.active(epoch)){this.busy=false;this.controller=null}}
   }
+  private reconciling = false
+  /** Remove only our submitted registration after a unique durable HITL result exists.
+   * This is registration housekeeping, never a stage approval or conflict recovery. */
+  async reconcileSubmitted(): Promise<void> {
+    if(this.reconciling || this.halted || !this.scope || !this.identity?.submittedIds.length || this.identity.status==='finished')return
+    const epoch=this.epoch, scope={...this.scope}, identity={...this.identity}
+    const current=()=>this.active(epoch) && this.identity?.threadId===identity.threadId && this.identity?.runId===identity.runId
+    this.reconciling=true
+    try {
+      const [transcript,pending]=await Promise.all([
+        this.services.transcript(scope.agentId,identity.threadId),
+        this.services.pending(scope.agentId,identity.threadId),
+      ])
+      if(!current())return
+      const conflicts=conflictingResearchHitlIds(transcript.messages)
+      if(identity.submittedIds.some(id=>conflicts.has(id.split(':').slice(1).join(':')))){
+        this.halt('审核存在重复结果或平台超时冲突，已停止推进；请核对平台持久记录。');return
+      }
+      const successful=successfulResearchHitlIds(transcript.messages)
+      for(const item of pending){
+        if(!current())return
+        const id=idOf(item),toolId=String(item.toolCallId || id.split(':').slice(1).join(':'))
+        if(!identity.submittedIds.includes(id) || !successful.has(toolId))continue
+        const remoteRun=item.metadata?.runId
+        if(typeof remoteRun==='string' && remoteRun && remoteRun!==identity.runId)continue
+        await this.services.remove(scope.agentId,identity.threadId,toolId)
+      }
+    } catch {
+      // A missing response is not evidence of acceptance. Preserve submitted IDs.
+      if(current())this.notice='审核提交仍需核对；本次对账未确认完成，没有重投审核。'
+    } finally { this.reconciling=false }
+  }
   /** Explicit read-only recheck after service repair. Never resubmit or delete a gate here. */
   async recheckBlocked() {
     if(!this.halted || !this.scope || !this.identity || this.busy || this.stopping)return
@@ -219,9 +251,15 @@ export class ResearchRunSession {
   async recover() {
     if(!this.scope || !this.identity || !this.identity.runId || this.busy || this.stopping || this.halted)return
     const epoch=this.epoch, scope={...this.scope}, identity={...this.identity};this.busy=true;this.error='';this.notice='正在核对会话、待答表单和运行状态。'
+    await this.reconcileSubmitted()
+    if(!this.active(epoch) || this.halted){if(this.active(epoch))this.busy=false;return}
     try {
       const [transcript,pending,status]=await Promise.all([this.services.transcript(scope.agentId,identity.threadId),this.services.pending(scope.agentId,identity.threadId),this.services.runStatus(scope.agentId,identity.threadId)])
       if(!this.active(epoch))return
+      const conflicts=conflictingResearchHitlIds(transcript.messages)
+      if(identity.submittedIds.some(id=>conflicts.has(id.split(':').slice(1).join(':')))){
+        this.halt('审核存在重复结果或平台超时冲突，已停止推进；请核对平台持久记录。');return
+      }
       this.messages=(transcript.messages || []).filter(m=>m.role==='user'||m.role==='assistant').map(m=>({id:m.id,role:m.role as 'user'|'assistant',text:(m.content || []).filter(b=>b.type==='text').map(b=>b.text||'').join('')})).filter(m=>m.text)
       // A resume can still own its SDK registration while the model is running.
       // Keep submitted IDs and wait for an idle snapshot before judging revival.
