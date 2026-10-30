@@ -4,7 +4,8 @@
     <p class="boundary">使用真实服务；请先测试模型响应。G1 的确认不等于工作台前三阶段全部正式确认。</p>
     <p v-if="configError" role="alert" class="error">{{configError}}</p>
     <p v-else-if="!owner" role="status">请先 <RouterLink to="/login">登录</RouterLink>，再使用智能体。</p>
-    <template v-else>
+      <details v-if="task.viewedPhase===3"><summary>准备团队问卷的 G2 输入</summary><p>保留当前题目、选项、编码、变量与来源；请粘贴到 G2 的 itemList；sourceNote 和预测试状态须人工核对填写。本机草稿不是已采用问卷，不会自动提交审核。</p><button @click="prepareG2">准备输入快照</button><p role="alert" v-if="g2Error">{{g2Error}}</p><textarea aria-label="G2 团队题项输入快照" readonly :value="g2Input" rows="8" /><p>此处为点击时的候选快照；编辑问卷后请重新准备，不会覆盖问卷或未发送消息。</p></details>
+    <template v-if="!configError && owner">
       <div class="top-actions">
         <button :disabled="session.busy || session.stopping || readOnly || session.halted" @click="session.probe()">测试模型响应</button>
         <button v-if="session.identity?.runId" :disabled="session.busy || session.stopping" class="secondary" @click="session.halted ? session.recheckBlocked() : session.recover()">{{ session.halted ? '重新核对异常会话' : '恢复／核对会话' }}</button>
@@ -56,6 +57,7 @@
   </section>
 </template>
 <script setup lang="ts">
+import {g2DraftInput} from '@/utils/researchPreviewInput'
 import {computed,onBeforeUnmount,onMounted,reactive,ref,watch} from 'vue'
 import {AUTH_CHANGE_EVENT} from '@/api/http'
 import {useUserStore} from '@/stores/user'
@@ -91,6 +93,9 @@ const stageName=computed(()=>['赛事理解','选题分析','研究方案','问�
 const stageHint=computed(()=>props.task.viewedPhase<=2?'G1 建议供人工对照，不覆盖当前编辑，也不代表正式阶段确认。':props.task.viewedPhase===3?'G2 结构化团队题项；请明确请求进入 G2，并按服务端题项表单提交，不自动代填或通过审核。':props.task.viewedPhase===5?'G3 需要 G2 已通过及团队分析计划；接收 CSV/TSV，不接收 XLSX/XLS。本机沙箱另支持 XLSX。':'G4 需要 G3 已通过；产出报告骨架、结果索引和答辩辅助，不代表完整正文。')
 const phaseFiles=computed(()=>stageArtifacts(files.value,session.identity?.projectId||'',props.task.viewedPhase))
 async function send(){const text=draft.value.trim();if(!text)return;const source=includeContext.value?'\n\n以下为用户提供的本机草稿，未经正式采用或事实核验：\n'+JSON.stringify({赛事理解:props.task.competition,选题分析:props.task.topicAnalysis,研究方案:props.task.researchPlan,...(props.task.viewedPhase===3?{团队问卷草稿:props.task.questionnaire}:{}),...(props.task.viewedPhase===5?{本机数据文件元信息:props.task.inputFile,说明:"文件元信息不是上传引用，智能体不可直接读取本机沙箱文件"}:{}),...(props.task.viewedPhase===6?{报告人工草稿:props.task.report}:{})}):'';const refs=attachments.value.length?'\n\n本会话已上传材料引用：\n'+attachments.value.map(item=>item.ref).join('\n'):'';await session.start(text+source+refs);if((session.status==='finished'||session.status==='interrupt'||session.status==='awaiting')&&draft.value.trim()===text)draft.value=''}
+const g2Input=ref(''),g2Error=ref('')
+watch(()=>props.task.localTaskId,()=>{g2Input.value='';g2Error.value=''})
+function prepareG2(){try{g2Input.value=g2DraftInput(props.task.questionnaire);g2Error.value=''}catch(e){g2Input.value='';g2Error.value=e instanceof Error?e.message:'输入准备失败'}}
 function chooseFile(event:Event){selectedFile.value=(event.target as HTMLInputElement).files?.[0]??null;attachmentError.value=''}
 function currentContext(){return {owner:owner.value,task:props.task.localTaskId,thread:session.identity?.threadId,agent:session.scope?.agentId}}
 function sameContext(c:ReturnType<typeof currentContext>){return owner.value===currentResearchOwner()&&owner.value===c.owner&&props.task.localTaskId===c.task&&session.identity?.threadId===c.thread&&session.scope?.agentId===c.agent}
