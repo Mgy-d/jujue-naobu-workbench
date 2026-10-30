@@ -28,14 +28,16 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: () => import('@/views/ResearchHomeView.vue') },
     { path: '/research/work', name: 'research-workspace', component: () => import('@/views/ResearchWorkspaceView.vue') },
+    // 市调大赛板块：赛题详情（实训指导书 / 复现入口）。数据为前端静态演示库。
+    { path: '/contest/problem/:id', name: 'contest-problem', component: () => import('@/views/ContestProblemView.vue') },
+    // 市调大赛板块：独立案例演示专区（面向访客，聚合展示平台能力，不臆造后端）。
+    { path: '/case-demo', name: 'case-demo-zone', component: () => import('@/views/CaseDemoZoneView.vue') },
+    // 市调大赛板块：案例复现（数模演易式：左 AI 对话步进 + 右产物查看）。两种模式：赛题复现 /research/replay/:id；本机任务复现 /research/replay?task=xx。
+    { path: '/research/replay/:id?', name: 'research-replay', component: () => import('@/views/ResearchReplayView.vue') },
+    // 市调版「我的成果」：本机研究任务 + 示例成果（演示数据，不臆造后端）。
+    { path: '/mine', name: 'mine', component: () => import('@/views/ResearchMineView.vue') },
     ...(import.meta.env.DEV ? [{ path: '/dev/research/contest', component: () => import('@/dev/ResearchComponentHarness.vue') }, { path: '/dev/research/stages', component: () => import('@/dev/ResearchStageHarness.vue') }] : []),
     { path: '/legacy/prototype', name: 'legacy-prototype', component: () => import('@/views/PrototypeShell.vue') },
-    {
-      path: '/mine',
-      name: 'mine',
-      component: () => import('@/views/PrototypeShell.vue'),
-      meta: { requiresAuth: true },
-    },
     {
       path: '/work',
       name: 'work',

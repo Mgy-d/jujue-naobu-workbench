@@ -62,6 +62,33 @@ export function applyQuestionnaireUpdate(task:LocalResearchTask,event:Questionna
 }
 export function emptyCollectionDraft(){return {channel:'',audience:'',startNote:'',stopRule:''}}
 export function emptyReportDraft(){return {body:'',defenseNotes:'',sourceNotes:''}}
+export type ReadinessLevel = 'ok' | 'risky' | 'blocked';
+export interface StageReadiness { level: ReadinessLevel; reasons: string[]; }
+export function precheckLaterStageReadiness(task: LocalResearchTask, phase: number): StageReadiness {
+    if (task.workflowKind !== 'full-study') return { level: 'blocked', reasons: ['该入口不涉及正式调查或报告阶段。'] };
+    if (phase === 4) {
+        const fields: Array<[keyof LocalResearchTask['collection'], string]> = [['channel','发布渠道'],['audience','调查对象与招募说明'],['startNote','计划开始时间与发布条件'],['stopRule','停止收集条件']];
+        const missing = fields.filter(([k]) => !(task.collection[k] ?? '').trim());
+        if (missing.length === 0) return { level: 'ok', reasons: ['正式调查发布准备已完整填写。'] };
+        if (missing.length === fields.length) return { level: 'blocked', reasons: ['尚未填写任何发布准备项。'] };
+        return { level: 'risky', reasons: missing.map(([, label]) => '待补充：' + label) };
+    }
+    if (phase === 6) {
+        const body = !!(task.report.body ?? '').trim();
+        const source = !!(task.report.sourceNotes ?? '').trim();
+        const defense = !!(task.report.defenseNotes ?? '').trim();
+        const linked = !!task.sandboxRef;
+        const reasons: string[] = [];
+        if (!body) reasons.push('待补充：报告正文草稿');
+        if (!source) reasons.push('待补充：来源与结果引用');
+        if (!defense) reasons.push('待补充：答辩准备笔记');
+        if (!linked) reasons.push('尚未关联本机分析结果（不能把未执行的统计写成已验证结论）');
+        if (reasons.length === 0) return { level: 'ok', reasons: ['报告与答辩草稿完整，且已关联本机分析结果。'] };
+        if (!body && !source && !defense) return { level: 'blocked', reasons };
+        return { level: 'risky', reasons };
+    }
+    return { level: 'blocked', reasons: ['该阶段不支持就绪度判定。'] };
+}
 function stringDraft<T extends Record<string,string>>(value:unknown,empty:T):T|null {
  if(value===undefined)return empty;
  if(!value||typeof value!=='object'||Object.keys(empty).some(k=>typeof (value as Record<string,unknown>)[k]!=='string'))return null;
@@ -144,6 +171,22 @@ export function saveLocalTask(storage: Storage, registry: TaskRegistry, task: Lo
     if (raw !== registry.baseline)
         throw Error('另一页面已更新本机草稿目录，本次停止覆盖；当前编辑仍保留，请先备份编辑再刷新核对。');
     const saved = { ...clean, savedAt: now }, next = { schemaVersion: 1 as const, tasks: { ...registry.tasks, [task.localTaskId]: saved }, lastByKind: { ...registry.lastByKind, [task.workflowKind]: registry.lastByKind[task.workflowKind] || task.localTaskId } };
+    const serialized = JSON.stringify(next);
+    storage.setItem(TASK_STORAGE_KEY, serialized);
+    return { ...next, baseline: serialized };
+}
+/** 删除一条本机研究任务：与 saveLocalTask 相同的 baseline 并发保护，防止覆盖另一页面的修改。 */
+export function removeLocalTask(storage: Storage, registry: TaskRegistry, localTaskId: string): TaskRegistry {
+    const target = registry.tasks[localTaskId];
+    if (!target) return registry;
+    const raw = storage.getItem(TASK_STORAGE_KEY);
+    if (raw !== null) { try { parseRegistry(raw); } catch { throw Error('本机草稿目录已损坏，停止覆盖并保留当前记录。'); } }
+    if (raw !== registry.baseline) throw Error('另一页面已更新本机草稿目录，本次删除停止执行；请刷新后核对。');
+    const kind = target.workflowKind, tasks = { ...registry.tasks };
+    delete tasks[localTaskId];
+    const lastByKind = { ...registry.lastByKind };
+    if (lastByKind[kind] === localTaskId) delete lastByKind[kind];
+    const next = { schemaVersion: 1 as const, tasks, lastByKind };
     const serialized = JSON.stringify(next);
     storage.setItem(TASK_STORAGE_KEY, serialized);
     return { ...next, baseline: serialized };

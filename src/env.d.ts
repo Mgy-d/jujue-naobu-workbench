@@ -12,6 +12,7 @@ interface ImportMetaEnv {
   readonly VITE_SZ_AGENT_NAME?: string
   readonly VITE_SZ_AGENT_ID?: string
   readonly VITE_RESEARCH_BUSINESS_MODE?: 'mock'
+  readonly VITE_RESEARCH_AGENT_MODE?: 'demo'
   readonly VITE_BACKEND_TARGET?: string
   readonly VITE_SMYY_AGENT_NAME?: string
   readonly VITE_SMYY_AGENT_ID?: string

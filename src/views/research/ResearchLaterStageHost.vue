@@ -1,5 +1,6 @@
 <template>
  <section class="later-stage" :aria-label="collectionMode?'正式调查准备':'报告与答辩编辑'">
+  <div class="readiness" :class="'readiness--'+readiness.level" role="status"><span class="readiness__tag">{{readinessLabel}}</span><ul v-if="readiness.reasons.length" class="readiness__list"><li v-for="(reason,i) in readiness.reasons" :key="i">{{reason}}</li></ul></div>
   <template v-if="collectionMode">
    <h2>正式调查 · 发布准备</h2><p role="status">采集服务待接入：目前不能生成公开链接、收集答卷或停止真实调查。</p>
    <p>当前问卷：{{task.questionnaire.meta.title||'未命名'}} · {{task.questionnaire.questions.length}} 题。预览使用当前草稿，不是正式发布版本。</p>
@@ -27,9 +28,12 @@ import {computed} from 'vue'
 import ResearchSavedResults from './ResearchSavedResults.vue'
 import QuestionnaireFillPreview from './QuestionnaireFillPreview.vue'
 import type {LocalResearchTask,CollectionDraft,ReportDraft} from '@/types/research-contracts'
+import {precheckLaterStageReadiness,type StageReadiness} from '@/utils/researchDrafts'
 const props=defineProps<{task:LocalResearchTask;readOnly?:boolean}>()
 const emit=defineEmits<{'update-collection':[value:CollectionDraft];'update-report':[value:ReportDraft];'save-local':[]}>()
 const collectionMode=computed(()=>props.task.workflowKind==='full-study'&&props.task.viewedPhase===4)
+const readiness=computed<StageReadiness>(()=>precheckLaterStageReadiness(props.task,props.task.viewedPhase))
+const readinessLabel=computed(()=>readiness.value.level==='ok'?'准备就绪':readiness.value.level==='risky'?'待补充':'尚未开始')
 const collectionLabels={channel:'计划发布渠道',audience:'调查对象与招募说明',startNote:'计划开始时间与发布条件',stopRule:'停止收集条件'}
 const reportLabels={body:'报告正文草稿',sourceNotes:'来源与结果引用',defenseNotes:'答辩准备笔记'}
 function citeResult(value:string){if(!props.readOnly)emit('update-report',{...props.task.report,sourceNotes:[props.task.report.sourceNotes,value].filter(Boolean).join('\n')})}
@@ -38,4 +42,10 @@ function report(key:keyof ReportDraft,event:Event){if(!props.readOnly)emit('upda
 </script>
 <style scoped>
 .later-stage{padding:26px;color:#234b3e;font-size:15px;line-height:1.8}h2{font-size:24px}label{display:grid;gap:6px;margin:16px 0}textarea,select,input{font:inherit;border:1px solid #b8cec5;border-radius:6px;padding:10px;box-sizing:border-box}textarea{width:100%;resize:vertical}button{font:inherit;background:#176f5b;color:white;padding:10px 14px;border:0;border-radius:6px;margin:6px;cursor:pointer}button:disabled{background:#e5eae7;color:#697b72;cursor:default}details{margin:22px 0;padding:16px;background:#f5f8f5}summary{cursor:pointer}pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}fieldset{margin:16px 0;border:1px solid #cddbd3}.option{display:flex;align-items:center;gap:9px}
+.readiness{margin:0 0 18px;padding:12px 16px;border:1px solid #dde8e3;border-left:3px solid #9aa;border-radius:9px;background:#f7faf8}
+.readiness__tag{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:#6b8177}
+.readiness__list{margin:8px 0 0;padding-left:20px;display:grid;gap:3px;font-size:12.5px;line-height:1.7;color:#45645a}
+.readiness--ok{border-left-color:#3f8f6b}.readiness--ok .readiness__tag{background:#3f8f6b}
+.readiness--risky{border-left-color:#c79a2e}.readiness--risky .readiness__tag{background:#c79a2e}
+.readiness--blocked{border-left-color:#b9543e}.readiness--blocked .readiness__tag{background:#b9543e}
 </style>

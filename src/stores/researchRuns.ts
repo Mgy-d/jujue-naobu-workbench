@@ -9,6 +9,8 @@ import { listPendingInterrupts, listLiveInterruptIds, registerInterrupts, remove
 import { fetchArtifactTree, fetchArtifactContent } from '@/api/artifact'
 import { collectResolvedToolCallIds } from '@/utils/analysis/gateRebuild'
 import { createResearchIdentity, loadResearchIdentity, saveResearchIdentity, type ResearchScope, type StoredResearchIdentity } from '@/utils/researchRunIdentity'
+import { RESEARCH_AGENT_DEMO, createDemoResearchServices } from '@/utils/researchDemoAgent'
+import { USER_KEY } from '@/stores/user'
 import type { ResearchIdentity, ResearchRunStatus } from '@/api/szRun'
 import type { AguiEvent, AguiInterrupt, AguiRunRequest } from '@/types/agui'
 import type { SessionTextMessage } from '@/api/session'
@@ -290,6 +292,14 @@ export class ResearchRunSession {
 
 /** Decode only the stable account subject for local namespacing; the server still checks authorization. */
 export function currentResearchOwner():string {
+  // 演示模式：mock 登录没有 JWT，用本地账号名做本机命名空间（仅本机数据，不涉服务端授权）。
+  if (RESEARCH_AGENT_DEMO) {
+    try {
+      const raw=localStorage.getItem(USER_KEY)
+      const parsed=raw?JSON.parse(raw) as {username?:string}:null
+      return 'demo:'+(parsed?.username||'guest')
+    } catch { return 'demo:guest' }
+  }
   try {
     const part=getAccessToken().split('.')[1]
     if(!part)return ''
@@ -298,7 +308,7 @@ export function currentResearchOwner():string {
   } catch {return ''}
 }
 
-const services:ResearchRunServices={
+const liveServices:ResearchRunServices={
   verify:verifyResearchAgent,
   stop:interruptResearchSession,
   run:streamResearchRun,
@@ -317,6 +327,8 @@ const services:ResearchRunServices={
 }
 export const useResearchRuns=defineStore('research-runs',()=>{
   const storage=markRaw({getItem:(key:string)=>localStorage.getItem(key),setItem:(key:string,value:string)=>localStorage.setItem(key,value)})
-  const session=reactive(new ResearchRunSession(storage,markRaw(services),currentResearchOwner)) as ResearchRunSession
+  // 演示模式（VITE_RESEARCH_AGENT_MODE=demo）：智能体对话走本机模拟脚本，不连接后端。
+  const services:ResearchRunServices=RESEARCH_AGENT_DEMO?markRaw(createDemoResearchServices(localStorage)):markRaw(liveServices)
+  const session=reactive(new ResearchRunSession(storage,services,currentResearchOwner)) as ResearchRunSession
   return {session}
 })

@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { CompetitionDraft, DraftContext, LocalResearchTask, WorkflowKind, SandboxReference, SelectedInputMetadata, ResearchStageDraftUpdate, QuestionnaireDraftUpdate } from '../types/research-contracts';
-import { createLocalTask, editLocalTask, loadTaskRegistry, applyResearchStageUpdate, applyQuestionnaireUpdate, matchesDraftContext, normalizeCompetitionDraft, saveLocalTask } from '../utils/researchDrafts';
+import { createLocalTask, editLocalTask, loadTaskRegistry, applyResearchStageUpdate, applyQuestionnaireUpdate, matchesDraftContext, normalizeCompetitionDraft, saveLocalTask, removeLocalTask, sandboxRefKey } from '../utils/researchDrafts';
 export const useResearchStore = defineStore('research-tasks', () => {
     const storage = { getItem: (key: string) => localStorage.getItem(key), setItem: (key: string, value: string) => localStorage.setItem(key, value) };
     const loaded = loadTaskRegistry(storage), registry = ref(loaded.registry), draft = ref<LocalResearchTask | null>(null), feedback = ref(''), storageError = ref(loaded.error || '');
@@ -81,7 +81,30 @@ export const useResearchStore = defineStore('research-tasks', () => {
             storageError.value = error instanceof Error && /另一页面|损坏/.test(error.message) ? error.message : '分析引用保存到本机失败；已登记的运行仍在当前页内存中，请勿关闭页面。';
         }
     }
+    /** 注入一份演示任务（客户展示用）：写入本机登记并打开它。返回任务 id。 */
+    function applySeed(task: LocalResearchTask) {
+        draft.value = task
+        keep()
+        registry.value.lastByKind[task.workflowKind] = task.localTaskId
+        save()
+        return task.localTaskId
+    }
     function recordSandboxReference(localTaskId: string, sandboxRef: SandboxReference) { persistTaskPatch(localTaskId, { sandboxRef }); }
     function recordInputFile(localTaskId: string, inputFile: SelectedInputMetadata) { persistTaskPatch(localTaskId, { inputFile }); }
-    return { registry, draft, context, feedback, storageError, open, create, update, updateCompetition, updateStage, updateQuestionnaire, save, recordSandboxReference, recordInputFile };
+    /** 删除一条本机任务（含草稿与沙箱引用登记）；若删的是当前任务，草稿置空，由页面负责重新打开。 */
+    function remove(localTaskId: string) {
+        if (!registry.value.tasks[localTaskId]) return false;
+        try { registry.value = removeLocalTask(storage, registry.value, localTaskId); }
+        catch (error) {
+            storageError.value = error instanceof Error ? error.message : '本机删除失败，任务仍保留。';
+            return false;
+        }
+        const wasCurrent = draft.value?.localTaskId === localTaskId;
+        try { localStorage.removeItem(sandboxRefKey(localTaskId)); } catch { /* 清理引用失败不影响删除 */ }
+        if (wasCurrent) draft.value = null;
+        storageError.value = '';
+        feedback.value = wasCurrent ? '已删除当前任务；请从列表选择或新建任务。' : '已删除该任务及其本机草稿。';
+        return true;
+    }
+    return { registry, draft, context, feedback, storageError, open, create, update, updateCompetition, updateStage, updateQuestionnaire, save, recordSandboxReference, recordInputFile, remove, applySeed };
 });

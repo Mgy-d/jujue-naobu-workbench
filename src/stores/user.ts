@@ -37,7 +37,8 @@ interface Account extends UserInfo {
   secretA?: string
 }
 
-const USER_KEY = 'smyy:user'
+/** 供演示模式读取 mock 登录身份；改动键名会破坏本机登录态兼容。 */
+export const USER_KEY = 'smyy:user'
 const ACC_KEY = 'smyy:accounts'
 
 /** 公共体验账号：内置固定账号，任何设备无需注册即可登录，保证人人可用 */

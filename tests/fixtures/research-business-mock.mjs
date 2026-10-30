@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 const prefix='/__research_mock__/v1';
 const clone=v=>structuredClone(v),json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
 const fail=(status,message)=>json({message},status),sameRef=(a,b)=>a&&b&&['projectId','workflowId','artifactId','versionId'].every(k=>a[k]===b[k]);
-export function createMockBusinessService(){
+export function createMockBusinessService(options={}){
  const projects=new Map(),versions=new Map(),files=new Map(),checks=new Map(),replays=new Map(),history=[];
  let actor='mock-owner',fault=null,latency=0;
  const service={history,projects,checks,setActor(value){actor=value},failNext(method,part,status){fault={method,part,status}},delayNext(ms){latency=ms},expireCheck(id){const c=checks.get(id);if(c)c.expires=0},setPermission(id,patch){Object.assign(projects.get(id).value.permissions,patch)},setParseStatus(id,status,message='合成解析状态'){for(const {value:p} of projects.values()){const f=p.files.find(f=>f.fileId===id);if(f){f.parseStatus=status;f.parseMessage=message;p.revision++}}},
@@ -50,7 +50,8 @@ export function createMockBusinessService(){
    const latest=[...p.candidates].reverse().find(s=>s.phase===phase);if(!latest||!sameRef(latest.ref,body.candidateRef))return fail(409,'Candidate changed');
    const v=versions.get(latest.ref.versionId),issues=[];
    if(p.workflowKind==='full-study'&&phase===0){if(!v.content.background?.trim())issues.push('缺少背景');if(!v.content.edition?.trim())issues.push('缺少届次');if(!v.content.group?.trim())issues.push('缺少组别');if(!v.content.requirements?.length)issues.push('缺少要求');if(!v.content.sources?.length)issues.push('缺少来源');if(v.content.unknowns?.some(u=>u.blocksDecision))issues.push('仍有阻断未知项')}
-   if(!(p.workflowKind==='full-study'&&phase===0))issues.push('本阶段检查规则尚未交付，Mock 仅支持候选保存和读回，不予确认。');
+   else if(p.workflowKind==='full-study'&&options.fullStudyChecks===true){const has=v&&v.content&&typeof v.content==='object'&&Object.values(v.content).some(x=>(typeof x==='string'&&x.trim())||(Array.isArray(x)&&x.length>0)||(x&&typeof x==='object'));if(!has)issues.push('缺少本阶段内容')}
+   if(!(p.workflowKind==='full-study'&&(phase===0||options.fullStudyChecks===true)))issues.push('本阶段检查规则尚未交付，Mock 仅支持候选保存和读回，不予确认。');
    const result={checkId:'mock-check-'+randomUUID(),projectId:p.projectId,workflowId:p.workflowId,revision:p.revision,phase,candidateRef:latest.ref,canConfirm:issues.length===0,issues,risks:['这是合成检查，不核验赛事事实或真实试填。']};checks.set(result.checkId,{...clone(result),expires:Date.now()+5*60*1000});return json(result);
   }
   if(parts[2]==='confirmations'){

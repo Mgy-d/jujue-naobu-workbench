@@ -1,9 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {createRequire} from 'node:module'
+import {fileURLToPath} from 'node:url'
 const require=createRequire(import.meta.url)
 const {build}=require(require.resolve('esbuild',{paths:[require.resolve('vite')]}))
-async function subject(path){const b=await build({entryPoints:[new URL(path,import.meta.url).pathname.replace(/^\//,'')],bundle:true,platform:'node',format:'esm',write:false});return import('data:text/javascript;base64,'+Buffer.from(b.outputFiles[0].text).toString('base64'))}
+async function subject(path){const b=await build({entryPoints:[fileURLToPath(new URL(path,import.meta.url))],bundle:true,platform:'node',format:'esm',write:false});return import('data:text/javascript;base64,'+Buffer.from(b.outputFiles[0].text).toString('base64'))}
 const memory=()=>{const m=new Map();return {getItem:k=>m.get(k)??null,setItem:(k,v)=>m.set(k,v)}}
 test('full-study sandbox, collection preparation and report survive refresh without changing other stages',async()=>{
  const m=await subject('../src/utils/researchDrafts.ts'),s=memory(),t=m.createLocalTask('full-study','a',1)
