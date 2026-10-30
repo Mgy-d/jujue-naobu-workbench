@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedOn": "2026-10-20",
+  "updatedOn": "2026-10-22",
   "timezone": "Asia/Shanghai",
   "developmentDirectory": "D:/scdc-develop",
   "backendDirectoryOutOfScope": "D:/mgy",
@@ -11,7 +11,7 @@
       "label": "当前稳定版",
       "branch": "stable/current",
       "branchCreated": false,
-      "status": "pending_first_verified_frontend_backup",
+      "status": "pending_first_verified_frontend_version",
       "version": null,
       "commit": null,
       "verificationRecord": null,
@@ -28,7 +28,6 @@
       "recoverable": false
     }
   },
-  "unverifiedDevelopmentBackupBranch": "backup/frontend",
-  "unverifiedBackupBranchCreated": false,
-  "frontendSourceUploadedByThisChange": false
+  "sourceManagement": "direct_git_working_tree",
+  "sourceBranch": "feat/research-intake"
 }
