@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2026 CUMCM E题 · SEM 广告投放策略优化 · 可视化分析</title>
+<style>
+:root{
+  --bg:#f3fafa; --card:#ffffff; --line:#d9e9e9; --line2:#eaf4f4;
+  --ink:#0b2e36; --ink2:#3d6570; --muted:#57727c;
+  --teal:#12a594; --teal-d:#0b6e68; --blue:#146c87; --cyan:#1e9fc4;
+  --gold:#e0a04a; --gold-d:#8a6313; --warn:#b8543a; --warn-bg:#fbf0ec;
+  --sh:0 1px 2px rgba(11,46,54,.05),0 8px 24px rgba(11,46,54,.06);
+  --r:12px;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--ink);
+  font:15px/1.72 "Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+}
+b,strong{font-weight:600;color:var(--ink)}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+/* ---------- 顶栏 ---------- */
+.topbar{
+  position:fixed;left:0;right:0;top:0;height:56px;z-index:40;
+  display:flex;align-items:center;gap:14px;padding:0 18px;
+  background:rgba(255,255,255,.97);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+}
+.brand{font-size:12.5px;letter-spacing:.08em;color:var(--muted);white-space:nowrap}
+.brand i{font-style:normal;color:var(--teal);font-weight:600}
+.scene-title{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--teal-d);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tools{display:flex;gap:8px}
+.tbtn{
+  font:inherit;font-size:12.5px;padding:5px 11px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:#fff;color:var(--ink2);transition:.18s;
+}
+.tbtn:hover{border-color:var(--teal);color:var(--teal-d)}
+.tbtn.on{background:var(--teal);border-color:var(--teal);color:#fff}
+
+/* ---------- 舞台与幕 ---------- */
+#stage{position:fixed;left:0;right:0;top:56px;bottom:76px;overflow:hidden}
+.scene{
+  position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:22px 26px 28px;
+  opacity:0;visibility:hidden;transform:translateY(22px) scale(.994);
+  transition:opacity .45s ease,transform .5s cubic-bezier(.22,.8,.3,1),visibility .45s;
+}
+.scene::-webkit-scrollbar{width:9px}
+.scene::-webkit-scrollbar-thumb{background:#cfe4e4;border-radius:9px}
+.scene.active{opacity:1;visibility:visible;transform:none}
+.wrap{max-width:1180px;margin:0 auto}
+.wrap>*{margin-bottom:16px}
+.wrap>*:last-child{margin-bottom:0}
+
+/* 逐拍露出 */
+.wrap>.stg{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s cubic-bezier(.22,.8,.3,1)}
+.wrap>.stg.in{opacity:1;transform:none}
+
+/* ---------- 文字块 ---------- */
+.kicker{font-size:12px;letter-spacing:.14em;color:var(--teal);font-weight:600;text-transform:uppercase}
+h1{font-size:26px;line-height:1.4;margin:6px 0 8px;font-weight:600;letter-spacing:-.01em}
+h1 small{display:block;font-size:14px;font-weight:400;color:var(--muted);margin-top:6px;letter-spacing:0}
+.lead{font-size:15px;color:var(--ink2);line-height:1.85;max-width:960px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;box-shadow:var(--sh)}
+.card h3{margin:0 0 10px;font-size:15px;font-weight:600;color:var(--teal-d);display:flex;align-items:center;gap:8px}
+.card h3 em{font-style:normal;font-size:11.5px;font-weight:500;color:var(--muted);letter-spacing:.04em}
+.card p{margin:0 0 8px;font-size:14px;color:var(--ink2);line-height:1.8}
+.card p:last-child{margin-bottom:0}
+.quote{
+  font-size:14px;line-height:1.9;color:var(--ink);background:var(--line2);
+  border-left:3px solid var(--teal);border-radius:0 8px 8px 0;padding:12px 14px;margin:10px 0;
+}
+.small{font-size:12.5px;color:var(--muted);line-height:1.75}
+.hl{color:var(--warn);font-weight:600}
+.hl-t{color:var(--teal-d);font-weight:600}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.flexrow{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.grow{flex:1;min-width:320px}
+@media(max-width:960px){
+  .grid2,.grid3,.grid4{grid-template-columns:1fr}
+  .scene{padding:16px 14px 24px}
+}
+
+/* ---------- 徽标 ---------- */
+.badge{display:inline-block;font-size:11px;line-height:1.6;padding:1px 7px;border-radius:5px;
+  background:var(--line2);color:var(--blue);border:1px solid #d5e8ea;margin-right:6px;white-space:nowrap}
+.badge.p{background:#fdf4e8;color:var(--gold-d);border-color:#f0dcbb}
+.badge.q{background:#eef7f6;color:var(--teal-d);border-color:#cfe7e5}
+.badge.w{background:var(--warn-bg);color:var(--warn);border-color:#f0d5cd}
+.badge.n{background:#f6f8f9;color:var(--muted);border-color:#e3eaec}
+
+/* ---------- 标签行 ---------- */
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 12px}
+.pill{
+  font:inherit;font-size:12.5px;padding:5px 13px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:#fff;color:var(--ink2);transition:.16s;
+}
+.pill:hover{border-color:var(--teal);color:var(--teal-d)}
+.pill.on{background:var(--teal-d);border-color:var(--teal-d);color:#fff;font-weight:600}
+.pill b{font-weight:600}
+
+/* ---------- 指标 ---------- */
+.kpi{background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+.kpi .k{font-size:11.5px;color:var(--muted);letter-spacing:.03em;margin-bottom:3px}
+.kpi .v{font-size:19px;font-weight:600;color:var(--teal-d);line-height:1.3}
+.kpi .v u{text-decoration:none;font-size:12px;font-weight:500;color:var(--muted);margin-left:3px}
+.kpi.g .v{color:var(--gold-d)}
+.kpi.b .v{color:var(--blue)}
+.kpi.w .v{color:var(--warn)}
+
+/* ---------- 表格 ---------- */
+table.tb{width:100%;border-collapse:collapse;font-size:13px}
+table.tb th,table.tb td{border-bottom:1px solid var(--line2);padding:7px 9px;text-align:left}
+table.tb th{font-size:11.5px;color:var(--muted);font-weight:600;background:#fafdfd;letter-spacing:.03em}
+table.tb td.num{text-align:right;font-variant-numeric:tabular-nums}
+table.tb tr.on td{background:#eef8f6}
+table.tb tr:hover td{background:#f6fbfb}
+
+/* ---------- 图区 ---------- */
+.canvasbox{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:12px 14px 8px;box-shadow:var(--sh)}
+.canvasbox canvas{display:block;width:100%}
+#cvSoc{cursor:crosshair;touch-action:none}
+.pill:disabled{cursor:default}
+.cvtop{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.cvtop .ct{font-size:13px;font-weight:600;color:var(--teal-d)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.legend i.ln{height:3px;width:16px;border-radius:2px;vertical-align:3px}
+
+/* ---------- 滑块 ---------- */
+.slider{display:flex;align-items:center;gap:12px;margin:8px 0}
+.slider input[type=range]{
+  flex:1;height:22px;background:transparent;cursor:pointer;
+  appearance:none;-webkit-appearance:none;accent-color:var(--teal);
+}
+.slider input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:#dbeaea}
+.slider input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:16px;height:16px;margin-top:-5.5px;
+  border-radius:50%;background:var(--teal);border:2px solid #fff;
+  box-shadow:0 1px 4px rgba(11,46,54,.28);
+}
+.slider input[type=range]:focus{outline:none}
+.slider input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 4px rgba(18,165,148,.22)}
+.slider input[type=range]::-moz-range-track{height:5px;border-radius:3px;background:#dbeaea}
+.slider input[type=range]::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;background:var(--teal);border:2px solid #fff;
+}
+.slider .sv{min-width:104px;text-align:right;font-size:14px;font-weight:600;color:var(--teal-d);
+  font-variant-numeric:tabular-nums}
+
+/* ---------- 矩阵 ---------- */
+.mx{display:grid;gap:6px}
+.mx .mh{font-size:11.5px;color:var(--muted);text-align:center;padding:2px 0}
+.mx .mr{font-size:12.5px;color:var(--ink2);display:flex;align-items:center;padding-right:6px;justify-content:flex-end}
+.mx .mc{
+  border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;transition:.16s;
+  padding:7px 6px;font-size:12px;text-align:center;color:var(--muted);line-height:1.45;
+}
+.mx .mc:hover{border-color:var(--teal)}
+.mx .mc.on{background:var(--teal-d);border-color:var(--teal-d);color:#fff;font-weight:600}
+.mx .mc.dim{opacity:.55}
+
+/* ---------- 提示条 ---------- */
+.note{
+  font-size:12.5px;color:var(--muted);background:#fafdfd;border:1px dashed var(--line);
+  border-radius:9px;padding:9px 12px;line-height:1.75;
+}
+.note.w{background:var(--warn-bg);border-color:#eed8d1;color:#8d4229}
+.hint{font-size:12px;color:var(--teal-d);background:#eef8f6;border-radius:8px;padding:7px 11px;display:inline-block}
+
+/* ---------- 底栏 ---------- */
+.navbar{
+  position:fixed;left:0;right:0;bottom:0;height:76px;z-index:40;
+  display:flex;align-items:center;justify-content:center;gap:16px;
+  background:rgba(255,255,255,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+}
+.navbar button.nb{
+  font:inherit;font-size:19px;line-height:1;width:40px;height:40px;border-radius:50%;cursor:pointer;
+  border:1px solid var(--line);background:#fff;color:var(--ink2);transition:.18s;
+}
+.navbar button.nb:hover{border-color:var(--teal);color:var(--teal-d);background:#f4fbfa}
+#dots{display:flex;gap:7px;align-items:center}
+.dot{width:9px;height:9px;border-radius:50%;background:#cfe4e4;border:0;padding:0;cursor:pointer;transition:.2s}
+.dot:hover{background:var(--cyan)}
+.dot.on{background:var(--teal-d);width:24px;border-radius:5px}
+.pageind{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
+.pageind b{color:var(--teal-d);font-size:14px}
+.progwrap{position:fixed;left:0;right:0;top:56px;height:2px;background:transparent;z-index:41}
+#prog{height:2px;background:linear-gradient(90deg,var(--teal),var(--cyan));width:0;transition:width .45s ease}
+.kbd{font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:1px 6px;background:#fff}
+
+/* 动效总开关（类名驱动，不用媒体查询） */
+body.reduce .pulse,body.reduce .flowdot,body.reduce .blink{animation:none !important}
+body.reduce.wrap>.stg{transition:none}
+body.reduce .wrap>.stg{opacity:1;transform:none}
+body.reduce .scene{transition:none}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.pulse{animation:pulse 2.2s ease-in-out infinite}
+@keyframes flow{0%{stroke-dashoffset:0}100%{stroke-dashoffset:-26}}
+.flowdot{animation:flow 1.5s linear infinite}
+ .splitnav{display:flex;gap:6px;align-items:center;margin-left:auto;font-size:12px;white-space:nowrap}.splitnav a{color:var(--ink2);text-decoration:none;padding:4px 7px;border:1px solid var(--line);border-radius:6px}.splitnav a:hover{color:var(--teal-d);border-color:var(--teal)}
+
+body{margin:0;background:var(--bg);color:var(--ink);padding:0 0 44px}
+.idx{width:100%;max-width:1180px;margin:0 auto;padding:0 24px;box-sizing:border-box}
+.idxhead{padding:40px 0 22px}
+.idxgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+.idxcard{display:block;text-decoration:none;color:inherit;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);
+  padding:16px 18px;transition:transform .15s,border-color .15s}
+.idxcard:hover{transform:translateY(-2px);border-color:var(--teal)}
+.idxcard .n{font-size:12px;letter-spacing:.14em;color:var(--teal);font-weight:600}
+.idxcard h3{margin:6px 0 9px;font-size:17px;font-weight:600}
+.idxcard ol{margin:0;padding-left:18px;font-size:12.5px;color:var(--muted);line-height:1.9}
+</style>
+</head>
+<body>
+<div class="idx idxhead">
+  <div class="kicker">2026 CUMCM E题 · 问题 E</div>
+  <h1>SEM 广告投放策略优化 · 可视化分析
+    <small>演示共 5 页、18 幕，按「全局 → 问题一至四」分页面组织。</small>
+  </h1>
+  <p class="lead">点击下列任一卡片进入对应页面。页面底部的按钮可在幕之间前后切换，顶部导航可跳转到其他问题。</p>
+</div>
+<div class="idx idxgrid"><a class="idxcard" href="01_全局问题分析.html"><div class="n">01</div><h3>全局问题分析</h3><ol><li>一 · 题面与数据规模</li><li>二 · 三张附件与四个问题的对应</li><li>三 · 五方案 × 十二单元的投入结构</li><li>四 · 贯穿全题的结构性事实</li></ol></a><a class="idxcard" href="02_问题一分析.html"><div class="n">02</div><h3>问题一分析</h3><ol><li>问题一 · 投放策略合理性</li><li>问题一 · 效益的时间规律与假日效应</li><li>问题一 · 星期层面的变化规律</li></ol></a><a class="idxcard" href="03_问题二分析.html"><div class="n">03</div><h3>问题二分析</h3><ol><li>问题二 · 成本 × 效益四象限分类</li><li>问题二 · 阈值稳健性检验</li><li>问题二 · 分类结果落到单元（result2）</li></ol></a><a class="idxcard" href="04_问题三分析.html"><div class="n">04</div><h3>问题三分析</h3><ol><li>问题三 · 推广单元级投放模型</li><li>问题三 · 单元级选词与预算再分配</li><li>问题三 · 指定窗口的数据依据</li><li>问题三 · 逐日 × 单元的投放明细</li></ol></a><a class="idxcard" href="05_问题四分析.html"><div class="n">05</div><h3>问题四分析</h3><ol><li>问题四 · 不确定性的量级</li><li>问题四 · 六项指标的期望范围</li><li>问题四 · 建模路径与交付格式</li><li>小结 · 数值纪律与溯源</li></ol></a></div>
+
+</body>
+</html>
