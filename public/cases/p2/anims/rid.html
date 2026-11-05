@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2026 CUMCM B题 · 无线电干扰源的快速自动定位与清除 · 可视化分析</title>
+<style>
+:root{
+  --bg:#f3fafa; --card:#ffffff; --line:#d9e9e9; --line2:#eaf4f4;
+  --ink:#0b2e36; --ink2:#3d6570; --muted:#57727c;
+  --teal:#12a594; --teal-d:#0b6e68; --blue:#146c87; --cyan:#1e9fc4;
+  --gold:#e0a04a; --gold-d:#8a6313; --warn:#b8543a; --warn-bg:#fbf0ec;
+  --sh:0 1px 2px rgba(11,46,54,.05),0 8px 24px rgba(11,46,54,.06);
+  --r:12px;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--ink);
+  font:15px/1.72 "Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+b,strong{font-weight:600;color:var(--ink)}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.kicker{font-size:12px;letter-spacing:.14em;color:var(--teal);font-weight:600;text-transform:uppercase}
+h1{font-size:26px;line-height:1.4;margin:6px 0 8px;font-weight:600;letter-spacing:-.01em}
+h1 small{display:block;font-size:14px;font-weight:400;color:var(--muted);margin-top:6px;letter-spacing:0}
+.lead{font-size:15px;color:var(--ink2);line-height:1.85;max-width:960px}
+.badge{display:inline-block;font-size:11px;line-height:1.6;padding:1px 7px;border-radius:5px;
+  background:var(--line2);color:var(--blue);border:1px solid #d5e8ea;margin-right:6px;white-space:nowrap}
+.badge.q{background:#eef7f6;color:var(--teal-d);border-color:#cfe7e5}
+.badge.w{background:var(--warn-bg);color:var(--warn);border-color:#f0d5cd}
+.badge.n{background:#f6f8f9;color:var(--muted);border-color:#e3eaec}
+body{margin:0;background:var(--bg);color:var(--ink);padding:0 0 44px}
+.idx{width:100%;max-width:1180px;margin:0 auto;padding:0 24px;box-sizing:border-box}
+.idxhead{padding:40px 0 22px}
+.idxgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+.idxcard{display:block;text-decoration:none;color:inherit;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);
+  padding:16px 18px;transition:transform .15s,border-color .15s}
+.idxcard:hover{transform:translateY(-2px);border-color:var(--teal)}
+.idxcard .n{font-size:12px;letter-spacing:.14em;color:var(--teal);font-weight:600}
+.idxcard h3{margin:6px 0 9px;font-size:17px;font-weight:600}
+.idxcard ol{margin:0;padding-left:18px;font-size:12.5px;color:var(--muted);line-height:1.9}
+.idxcard .tagline{font-size:12.5px;color:var(--ink2);margin:0 0 8px}
+@media(max-width:960px){.idxgrid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="idx idxhead">
+  <div class="kicker">2026 CUMCM B题 · 问题 B</div>
+  <h1>无线电干扰源的快速自动定位与清除 · 可视化分析
+    <small>演示共 5 页、18 幕，按「全局 → 问题一至四」分页面组织。</small>
+  </h1>
+  <p class="lead">机器狗搭载测向机，在半径 1800 m 的圆形区域内找出全部干扰源并逐个清除。四个问题共用同一套「发现—定位—清除」流程，差别在于源的辐射类型与已知信息。点击下列任一卡片进入对应页面；页面底部的按钮可在幕之间前后切换。</p>
+</div>
+<div class="idx idxgrid">
+  <a class="idxcard" href="rid-0.html">
+    <div class="n">01</div><h3>全局问题分析</h3>
+    <p class="tagline">先把仿真环境、两类源与四个问题的关系理清。</p>
+    <ol>
+      <li>一 · 题面与仿真环境规模</li>
+      <li>二 · 两类干扰源与四问对应</li>
+      <li>三 · 示向度、定位区域与判定口径</li>
+      <li>四 · 贯穿全题的结构性事实</li>
+    </ol>
+  </a>
+  <a class="idxcard" href="rid-1.html">
+    <div class="n">02</div><h3>问题一分析</h3>
+    <p class="tagline">多条示向度交会出的定位区域，与「以 D 为直径的圆」之辨。</p>
+    <ol>
+      <li>问题一 · 示向度扇形与定位区域</li>
+      <li>问题一 · 直径 D 与覆盖圆判据</li>
+      <li>问题一 · 数值结果与结论</li>
+    </ol>
+  </a>
+  <a class="idxcard" href="rid-2.html">
+    <div class="n">03</div><h3>问题二分析</h3>
+    <p class="tagline">在保证可接收的前提下，为第二检测点选一个最好的位置。</p>
+    <ol>
+      <li>问题二 · 第二测点与候选区</li>
+      <li>问题二 · 目标函数 J(S) 的构造</li>
+      <li>问题二 · 搜索网格与最优解</li>
+    </ol>
+  </a>
+  <a class="idxcard" href="rid-3.html">
+    <div class="n">04</div><h3>问题三分析</h3>
+    <p class="tagline">全向源、数量未知：先保证覆盖，再局部定位清除。</p>
+    <ol>
+      <li>问题三 · 正六边形全局覆盖</li>
+      <li>问题三 · 局部定位与清除</li>
+      <li>问题三 · 终止条件与状态核销</li>
+      <li>问题三 · 时序与耗时预算</li>
+    </ol>
+  </a>
+  <a class="idxcard" href="rid-4.html">
+    <div class="n">05</div><h3>问题四分析</h3>
+    <p class="tagline">加入定向源后，覆盖必须同时对付距离与方向的不确定。</p>
+    <ol>
+      <li>问题四 · 定向源的辐射扇区与盲区</li>
+      <li>问题四 · 方向鲁棒网格与镜像测点</li>
+      <li>问题四 · 与问题三的对比与总结</li>
+    </ol>
+  </a>
+</div>
+</body>
+</html>
