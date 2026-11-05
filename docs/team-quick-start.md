@@ -38,7 +38,7 @@ pnpm dev:company
 
 如果负责人已经部署好服务，在 `.env.company.local` 中将 `VITE_COLLECTION_TARGET` 设为该服务地址，例如 http://服务电脑地址:8090，随后重启前端。前端通过 `/collection-api` 代理访问它。
 
-服务负责人需要配置 PostgreSQL、Redis、服务可访问地址，以及与公司平台匹配的认证配置。当前实现使用服务端 `TJDC_JWT_SECRET` 验证平台令牌。该值仅配置在后端环境中，通过公司安全渠道提供，不能写进前端文件或 Git。
+服务负责人需要配置 PostgreSQL、Redis、服务可访问地址，以及与公司平台匹配的认证配置。company profile 默认用 remote 认证：第二后端携带当前访问令牌调用平台 `/api/auth/me`，无需共享签名密钥。后端配置 `TJDC_AUTH_MODE=remote` 与 `TJDC_PLATFORM_URL`；平台故障返回503，不跳过认证。local 模式仍需匹配的 `TJDC_JWT_SECRET`。
 
 若自己启动后端，参考后端仓库 README 和 docs/collection-integration.md。需要 Java 21、Maven 和 Docker 或可访问的 PostgreSQL/Redis。
 
@@ -61,8 +61,24 @@ pnpm build
 python scripts/check_repository.py
 ```
 
-2026-11-05 本地前端回归 338 项通过，类型检查和构建通过；这是本机代码验证记录。另一台公司电脑的真实登录、智能体交互及问卷服务连接仍需在其环境验收。
+2026-11-05 本地前端回归 343 项通过，类型检查和构建通过；这是本机代码验证记录。另一台公司电脑的真实登录、智能体交互及问卷服务连接仍需在其环境验收。
 
 正式站点由负责人部署 `dist`，为 `/api`、`/agui` 和 `/collection-api` 配置反向代理。Vite 开发代理不会随 `dist` 自动部署。独立沙箱 `/sandbox-api` 仍需部署其对应服务。
 
 提交源码、锁文件、样例配置和必要静态资源。真实 `.env`、密码、令牌、数据库、node_modules、dist、浏览器草稿和运行日志保留在各自环境。
+
+
+## 统一数据库存储（V5）
+
+公司 scdc 数据库新增研究记录与文件归档表。前端仍通过第二个后端访问数据库。
+真实账号登录后，任务草稿按账号同步，读取到的对话定期归档，成果首版记录由“保存成果记录”保存。
+“我的成果”显示同步状态。网络或认证失败时保留缓存并显示失败，不显示数据库已保存。
+旧任务若已有匹配账号的会话绑定会同步，其他旧任务需要用户确认导入。
+数据库保存不会代表智能体审核通过，执行状态仍需原会话核对。
+
+第二后端需更新到含 V5 迁移和 research 接口的版本。公司库配置参阅后端 docs/unified-research-storage.md。
+前端一键入口检测后端 .env.company.local 后跳过本机 PostgreSQL，使用公司数据库。
+仅更新前端、未启动第二后端时会明确提示数据库服务无法访问。
+
+本轮新增存储验证：前端343项通过；后端13项通过，包含实际公司 PostgreSQL 的迁移和存取测试。合成业务记录均已回滚。第二后端常驻服务与公司真实账号认证仍需联网启动后验收。
+新增远程认证离线测试6项通过；后端本轮19项登记、17项通过、2项数据库测试离线跳过。明日操作见第二后端 docs/remote-auth-acceptance.md。

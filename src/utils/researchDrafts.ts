@@ -94,7 +94,7 @@ function stringDraft<T extends Record<string,string>>(value:unknown,empty:T):T|n
  if(!value||typeof value!=='object'||Object.keys(empty).some(k=>typeof (value as Record<string,unknown>)[k]!=='string'))return null;
  return Object.fromEntries(Object.keys(empty).map(k=>[k,(value as T)[k]])) as T;
 }
-function cleanTask(v: any): LocalResearchTask | null {
+export function cleanTask(v: any): LocalResearchTask | null {
     const collection=stringDraft(v?.collection,emptyCollectionDraft()),report=stringDraft(v?.report,emptyReportDraft());
     if(!collection||!report)return null;
     const competition = normalizeCompetitionDraft(v?.competition);

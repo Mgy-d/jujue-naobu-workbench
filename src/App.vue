@@ -53,7 +53,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 
 import { useSandboxStore } from '@/stores/sandbox'
+import {useUserStore} from '@/stores/user'
+import {useResearchStore} from '@/stores/research'
+import {AUTH_MODE} from '@/api/http'
+import {researchCloudOwner} from '@/api/researchCloud'
 
+const storageUser=useUserStore(),researchTasks=useResearchStore()
+watch(()=>storageUser.isLogged?researchCloudOwner():'',owner=>{
+  if(AUTH_MODE==='real')void researchTasks.connectCloud(owner)
+},{immediate:true})
 const route = useRoute()
 const sandbox = useSandboxStore()
 

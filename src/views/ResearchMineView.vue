@@ -20,16 +20,21 @@
 
     <section class="mine-body">
       <div class="mine-head">
-        <div><h1>我的成果</h1><p class="mine-sub">本机研究任务保存在当前浏览器；示例成果为演示数据，不是你的真实成果。</p></div>
+        <div><h1>我的成果</h1><p class="mine-sub">{{researchStore.cloudOwner?'研究任务按登录账号保存在公司数据库；示例成果为演示资料。':'本机研究任务保存在当前浏览器；示例成果为演示数据。'}}</p></div>
         <div class="grow"></div>
         <RouterLink class="btn-send" to="/">新建研究任务<svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" /></svg></RouterLink>
       </div>
 
+      <div v-if="researchStore.cloudOwner" class="cloud-storage-status" role="status">
+        <span>{{researchStore.cloudStatus==='ready'?'公司数据库已同步':researchStore.cloudStatus==='saving'?'正在保存到公司数据库…':researchStore.cloudStatus==='loading'?'正在读取公司数据库…':researchStore.cloudError}}</span>
+        <button v-if="researchStore.cloudStatus==='error'" class="btn-open" @click="researchStore.retryCloud()">重试同步</button>
+        <button v-if="researchStore.legacyTaskCount" class="btn-open" @click="importOldTasks">导入本机旧任务（{{researchStore.legacyTaskCount}}）</button>
+      </div>
       <section class="section" aria-labelledby="mine-tasks-title">
-        <div class="sec-head"><h2 id="mine-tasks-title">本机研究任务</h2><span class="sub">{{tasks.length}} 项 · 每项任务独立保留草稿</span></div>
+        <div class="sec-head"><h2 id="mine-tasks-title">{{researchStore.cloudOwner?'我的研究任务':'本机研究任务'}}</h2><span class="sub">{{tasks.length}} 项 · 每项任务独立保留草稿</span></div>
         <div v-if="tasks.length" class="task-grid">
           <article v-for="item in tasks" :key="item.localTaskId" class="gcard task-card" :class="{unsaved:!item.savedAt}">
-            <div class="top"><span class="tag-c">{{modeLabel(item.workflowKind)}}</span><span class="mtag">{{item.savedAt?'已存本机':'待保存'}}</span></div>
+            <div class="top"><span class="tag-c">{{modeLabel(item.workflowKind)}}</span><span class="mtag">{{researchStore.cloudOwner?(researchStore.cloudStatus==='ready'?'数据库已同步':'待同步数据库'):(item.savedAt?'已存本机':'待保存')}}</span></div>
             <h4 :title="item.title||modeLabel(item.workflowKind)">{{item.title||modeLabel(item.workflowKind)}}</h4>
             <p>进度：{{stageLabel(item.workflowKind,item.viewedPhase)}} · 更新于 {{new Date(item.updatedAt).toLocaleString()}}</p>
             <div class="task-acts">
@@ -80,17 +85,21 @@ const userStore=useUserStore(),researchStore=useResearchStore()
 const problems=CONTEST_PROBLEMS
 const shared=reactive<Record<string,boolean>>({})
 const tasks=computed(()=>Object.values(researchStore.registry.tasks).sort((a,b)=>b.updatedAt-a.updatedAt))
+async function importOldTasks(){
+  if(window.confirm('确认将当前浏览器的旧任务导入到你当前登录的账号？请确认这些任务属于你，原本机记录会保留。'))await researchStore.importLocalTasks()
+}
 function modeLabel(kind:WorkflowKind){return workflowLabel(kind)}
 function stageLabel(kind:WorkflowKind,phase:number){return stagesFor(kind)[phase]?.title??'—'}
 function removeTask(item:{localTaskId:string;title:string}){
   const label=item.title||'未命名任务'
-  if(!window.confirm(`删除研究任务「${label}」及其本机草稿？此操作不可恢复。`))return
+  if(!window.confirm(`删除研究任务「${label}」及其草稿？数据库记录会标记为删除。`))return
   researchStore.remove(item.localTaskId)
 }
 </script>
 
 <style scoped lang="scss" src="../styles/research-home.scss"></style>
 <style scoped>
+.cloud-storage-status{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:18px;padding:12px 16px;border:1px solid #91B9B1;border-radius:12px;background:#EFFAF8;color:#0B6E68;font-size:13px}
 .mine-body{max-width:1280px;margin:0 auto;padding:36px 32px 64px}
 .mine-head{display:flex;align-items:flex-end;gap:16px;margin-bottom:26px}
 .mine-head h1{margin:0 0 6px;font-size:26px;color:#0b6e68}
@@ -111,5 +120,6 @@ function removeTask(item:{localTaskId:string;title:string}){
 .empty-card h3{margin:0 0 8px;font-size:17px;color:#0b2e36}
 .empty-card p{margin:0 0 18px;font-size:13px;color:#57727c}
 .empty-acts{display:flex;justify-content:center;gap:12px}
-@media(max-width:820px){.mine-body{padding:24px 18px 48px}.mine-head{flex-direction:column;align-items:flex-start}}
+@media(max-width:820px){.cloud-storage-status{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:18px;padding:12px 16px;border:1px solid #91B9B1;border-radius:12px;background:#EFFAF8;color:#0B6E68;font-size:13px}
+.mine-body{padding:24px 18px 48px}.mine-head{flex-direction:column;align-items:flex-start}}
 </style>

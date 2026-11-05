@@ -1,3 +1,6 @@
+import {useResearchStore} from '@/stores/research'
+import {AUTH_MODE} from '@/api/http'
+import {researchCloudOwner} from '@/api/researchCloud'
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 import { useUserStore, type UserInfo } from '@/stores/user'
@@ -105,6 +108,7 @@ router.beforeEach(async (to) => {
   if (!userStore.isLogged) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
+  if(AUTH_MODE==='real')await useResearchStore().connectCloud(researchCloudOwner())
   if (to.meta.requiresAdmin && !isAdminUser(userStore.user)) {
     return { name: 'home' }
   }

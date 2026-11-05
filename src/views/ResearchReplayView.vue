@@ -31,8 +31,8 @@
       <span v-if="!task" class="env-badge" :class="{inactive:!envReady}"><span>{{envLabel}}</span></span>
       <span class="stag" :class="{done:finished}"><i aria-hidden="true"></i>{{ stagText }}</span>
       <div class="flow-tools">
-        <button v-if="task" type="button" class="flow-tool" :disabled="recordBusy || !liveScopeMatches" @click="saveLocalRecord">{{recordBusy?'保存中…':'保存本次记录'}}</button>
-        <button v-if="task" type="button" class="flow-tool" :disabled="!liveScopeMatches" @click="openLocalRecord">本机复现</button>
+        <button v-if="task" type="button" class="flow-tool" :disabled="recordBusy || !liveScopeMatches" @click="saveLocalRecord">{{recordBusy?'保存中…':(researchStore.cloudOwner?'保存成果记录':'保存本次记录')}}</button>
+        <button v-if="task" type="button" class="flow-tool" :disabled="!liveScopeMatches" @click="openLocalRecord">{{researchStore.cloudOwner?'记录复现':'本机复现'}}</button>
         <button type="button" class="flow-tool" title="暂停当前流程，先问一个问题" @click="askPause">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9.8 9a2.4 2.4 0 1 1 3.7 2c-1 .6-1.5 1.1-1.5 2.2" /><path d="M12 17h.01" /></svg>
           我有问题
@@ -55,6 +55,7 @@
         <div ref="streamEl" class="stream" @scroll="trackConversationScroll">
           <div class="stream-in">
             <p v-if="recordNotice" class="tip-line" role="status">{{recordNotice}}</p>
+            <p v-if="researchStore.cloudOwner && researchStore.cloudStatus==='error'" class="tip-line" role="alert">数据库尚未同步：{{researchStore.cloudError}} <button type="button" class="chip" @click="researchStore.retryCloud()">重试同步</button></p>
             <div v-for="m in displayMessages" :key="m.key" class="msg" :class="m.who">
               <div class="bubble">
                 <div class="txt" :class="{'message-markdown':!!task}" v-html="m.html"></div>
@@ -310,6 +311,9 @@
 import {fetchArtifactContent} from '@/api/artifact'
 import {computed,nextTick,onBeforeUnmount,onMounted,reactive,ref,watch} from 'vue'
 import {researchG3Action} from '@/utils/researchProgress'
+import {researchCloud,archiveResearchFile} from '@/api/researchCloud'
+import {loadResearchIdentity,saveResearchIdentity} from '@/utils/researchRunIdentity'
+import {agentIdFromName} from '@/utils/nameUuid'
 import {useRoute,useRouter} from 'vue-router'
 import {getContestProblem} from '@/data/contestProblems'
 import {uploadAttachment,listAttachments,deleteAttachment,precheckFile} from '@/api/attachment'
@@ -522,7 +526,27 @@ async function openArtifactPreview(path:string){
   openArt.value=null
   previewPath.value=path
   previewDialog.value?.showModal()
+  const generation=liveGeneration,identity=liveSession.identity?{...liveSession.identity}:null
   await liveSession.previewArtifact(path)
+  if(generation!==liveGeneration || !identity || researchStore.cloudOwner!==currentResearchOwner() || !task.value)return
+  const taskId=task.value.localTaskId,key=agentIdFromName('research-artifact:'+taskId+':'+identity.threadId+':'+path)
+  const current=()=>generation===liveGeneration && identity.threadId===liveSession.identity?.threadId && path===previewPath.value
+  try{
+    const file=liveSession.preview
+    if(file?.path===path && file.content!==null && !file.truncated && !file.binary){
+      await researchStore.flushCloud()
+      if(!current())return
+      await researchCloud.save('artifact',key,{taskId,threadId:identity.threadId,runId:identity.runId,path,
+        content:file.content,capturedAt:new Date().toISOString(),source:'agent-platform-read'})
+    }else{
+      const archived=await researchCloud.get<{taskId:string;threadId:string;path:string;content:string}>('artifact',key)
+      if(!current())return
+      if(archived && archived.data.taskId===taskId && archived.data.threadId===identity.threadId && archived.data.path===path){
+        liveSession.preview={path,content:archived.data.content,truncated:false,binary:false}
+        recordNotice.value='当前预览来自公司数据库归档，实时文件暂未读取成功。'
+      }
+    }
+  }catch(error){if(current())recordNotice.value='产物数据库归档尚未完成：'+(error instanceof Error?error.message:'连接失败')}
 }
 watch(()=>openArt.value,art=>{if(art){previewPath.value='';void nextTick(()=>{if(!previewDialog.value?.open)previewDialog.value?.showModal()})}})
 watch(()=>[task.value?.localTaskId,liveOwner.value,liveSession.identity?.threadId],()=>{previewDialog.value?.close();closePreviewState()})
@@ -585,7 +609,26 @@ async function syncLiveIdentity(){
   if(!owner){liveSession.dispose();liveError.value='请先登录，再连接市调智能体；当前题目仍保存在本机草稿中。';return}
   try{
     const agent=configuredResearchAgent()
-    await liveSession.select({ownerId:owner,agentId:agent.id,taskId:currentTask.localTaskId})
+    const scope={ownerId:owner,agentId:agent.id,taskId:currentTask.localTaskId}
+    type ArchivedSession={identity:import('@/utils/researchRunIdentity').StoredResearchIdentity;messages:import('@/stores/researchRuns').ResearchMessage[]}
+    let archived:ArchivedSession|null=null
+    if(researchStore.cloudOwner===owner && researchStore.cloudStatus!=='error'){
+      try{
+        const row=await researchCloud.get<ArchivedSession>('session',currentTask.localTaskId+':'+agent.id)
+        if(generation!==liveGeneration || currentResearchOwner()!==owner)return
+        if(row){
+          archived=row.data
+          if(!Array.isArray(archived.messages))throw Error('数据库对话归档格式不完整')
+          const stored=loadResearchIdentity(localStorage,scope)
+          if(!stored.identity)saveResearchIdentity(localStorage,scope,null,archived.identity)
+        }
+      }catch(error){if(generation===liveGeneration)recordNotice.value='数据库对话读取失败：'+(error instanceof Error?error.message:'请检查连接')}
+    }
+    await liveSession.select(scope)
+    if(generation===liveGeneration && archived && !liveSession.messages.length){
+      liveSession.messages=archived.messages.filter(message=>message && typeof message.id==='string' && ['user','assistant'].includes(message.role) && typeof message.text==='string')
+      recordNotice.value='已读取公司数据库中的对话归档；当前执行状态仍以原会话核对为准。'
+    }
     if(generation!==liveGeneration)return
     if(route.query.autoStart==='1'&&!autoStartedTasks.has(currentTask.localTaskId)){
       autoStartedTasks.add(currentTask.localTaskId)
@@ -640,12 +683,47 @@ async function sendLive(text:string,initial=false,recoverExpiredGate=false){
 interface LocalRecord {version:1;title:string;savedAt:string;phase:string;messages:{id:string;role:'user'|'assistant';text:string}[];files:{path:string;content:string}[];gaps:string[]}
 const recordBusy=ref(false),recordNotice=ref(''),savedRecord=ref<LocalRecord|null>(null),recordStep=ref(1),recordDialog=ref<HTMLDialogElement|null>(null)
 function localRecordKey(){return 'shidiaoyanzhen.record.v1:'+liveOwner.value+':'+liveSession.scope?.agentId+':'+task.value?.localTaskId}
+let archivingConversation=false,archivedConversation=''
+async function archiveConversation(){
+  if(archivingConversation || !liveScopeMatches.value || !liveSession.identity || !task.value
+      || researchStore.cloudOwner!==currentResearchOwner() || researchStore.cloudStatus==='error' || !liveSession.messages.length)return
+  const owner=currentResearchOwner(),generation=liveGeneration,identity={...liveSession.identity}
+  const id=task.value.localTaskId+':'+identity.agentId
+  const snapshot={taskId:task.value.localTaskId,identity,phase:liveSession.serverPhase,
+    capturedAt:new Date().toISOString(),messages:liveSession.messages.map(message=>({...message}))}
+  const signature=JSON.stringify({...snapshot,capturedAt:''})
+  if(signature===archivedConversation)return
+  archivingConversation=true
+  try{
+    await researchStore.flushCloud()
+    if(generation!==liveGeneration || owner!==currentResearchOwner())return
+    await researchCloud.save('session',id,snapshot)
+    if(generation===liveGeneration)archivedConversation=signature
+  }catch(error){if(generation===liveGeneration)recordNotice.value='对话尚未同步到数据库：'+(error instanceof Error?error.message:'保存失败')}
+  finally{archivingConversation=false}
+}
 async function saveLocalRecord(){
   if(recordBusy.value || !liveScopeMatches.value || !liveSession.identity || !liveSession.scope)return
   const generation=liveGeneration,key=localRecordKey(),identity={...liveSession.identity},agentId=liveSession.scope.agentId
-  if(localStorage.getItem(key)){recordNotice.value='本任务的第一份记录已保存，点击“本机复现”查看。';return}
+  if(!researchStore.cloudOwner && localStorage.getItem(key)){recordNotice.value='本任务的第一份记录已保存，点击“本机复现”查看。';return}
   recordBusy.value=true;recordNotice.value='正在保存当前对话与可读取产物…'
   try{
+    if(researchStore.cloudOwner){
+      const existing=await researchCloud.get<{taskId:string;record:LocalRecord}>('record',task.value!.localTaskId)
+      if(generation!==liveGeneration)return
+      if(existing){recordNotice.value='本任务的第一份成果记录已在公司数据库保存，可点击“记录复现”查看。';return}
+      const cached=localStorage.getItem(key)
+      if(cached){
+        const first=JSON.parse(cached) as LocalRecord
+        if(first.version===1 && Array.isArray(first.messages) && Array.isArray(first.files) && Array.isArray(first.gaps)){
+          await researchStore.flushCloud()
+          if(generation!==liveGeneration)return
+          await researchCloud.save('record',task.value!.localTaskId,{taskId:task.value!.localTaskId,record:first})
+          if(generation===liveGeneration)recordNotice.value='原本机首版记录已导入公司数据库，可点击“记录复现”查看。'
+          return
+        }
+      }
+    }
     const record:LocalRecord={version:1,title:task.value?.title || '研究记录',savedAt:new Date().toISOString(),phase:liveSession.serverPhase,messages:liveSession.messages.map(m=>({id:m.id,role:m.role,text:m.text})),files:[],gaps:[]}
     if(!record.messages.length)throw Error('尚未读取到对话，请先核对会话。')
     if(!liveSession.busy)await liveSession.refreshArtifacts()
@@ -665,14 +743,29 @@ async function saveLocalRecord(){
     const json=JSON.stringify(record)
     if(new Blob([json]).size>3000000)throw Error('记录超过3MB，请减少材料后保存。')
     if(generation!==liveGeneration || key!==localRecordKey())return
-    localStorage.setItem(key,json)
-    recordNotice.value='已保存第一份本机记录。'+(record.gaps.length?'部分文件未保存，复现时会显示缺口。':'可点击“本机复现”从头查看。')
+    if(researchStore.cloudOwner){
+      await researchStore.flushCloud()
+      if(generation!==liveGeneration)return
+      await researchCloud.save('record',task.value!.localTaskId,{taskId:task.value!.localTaskId,record})
+      if(generation!==liveGeneration)return
+      try{localStorage.setItem(key,json)}catch{}
+      recordNotice.value='成果记录已保存到公司数据库。'+(record.gaps.length?'部分文件未保存，复现时会显示缺口。':'可点击“记录复现”查看。')
+    }else{
+      localStorage.setItem(key,json)
+      recordNotice.value='已保存第一份本机记录。'+(record.gaps.length?'部分文件未保存，复现时会显示缺口。':'可点击“本机复现”从头查看。')
+    }
   }catch(error){if(generation===liveGeneration)recordNotice.value='保存失败：'+(error instanceof Error?error.message:'浏览器存储不可用')}
   finally{recordBusy.value=false}
 }
-function openLocalRecord(){
+async function openLocalRecord(){
+  const generation=liveGeneration
   try{
-    const raw=localStorage.getItem(localRecordKey())
+    let raw:string|null=null
+    if(researchStore.cloudOwner && task.value){
+      const row=await researchCloud.get<{taskId:string;record:LocalRecord}>('record',task.value.localTaskId)
+      if(generation!==liveGeneration)return
+      if(row)raw=JSON.stringify(row.data.record)
+    }else raw=localStorage.getItem(localRecordKey())
     if(!raw)throw Error('请先保存本次记录。')
     const record=JSON.parse(raw) as LocalRecord
     if(record.version!==1 || !Array.isArray(record.messages) || !Array.isArray(record.files) || !Array.isArray(record.gaps))throw Error('本机记录格式不完整。')
@@ -765,6 +858,16 @@ async function uploadMaterial(){
     if(!sameMaterialContext(context,operation))return
     if(!item.ref)throw Error('上传返回缺少服务器材料引用，尚不能确认上传结果。')
     materials.value=[...materials.value.filter(existing=>existing.ref!==item.ref),item]
+    if(researchStore.cloudOwner){
+      try{
+        await researchStore.flushCloud()
+        if(!sameMaterialContext(context,operation))return
+        const bytes=await file.arrayBuffer()
+        if(!sameMaterialContext(context,operation))return
+        await archiveResearchFile(context.taskId,file.name,item.ref,bytes)
+      }
+      catch(error){if(sameMaterialContext(context,operation))recordNotice.value='文件已上传智能体，但数据库归档失败：'+(error instanceof Error?error.message:'连接失败')}
+    }
     selectedMaterial.value=null
     if(materialInput.value)materialInput.value.value=''
   }catch(error){
@@ -832,6 +935,7 @@ const backgroundChecks=ref(0)
 let backgroundTimer:ReturnType<typeof setInterval>|undefined
 watch(()=>[task.value?.localTaskId,liveSession.identity?.threadId,liveSession.identity?.runId],()=>{backgroundChecks.value=0})
 async function checkBackground(){
+  if(document.visibilityState==='visible')void archiveConversation()
   if(document.visibilityState==='visible' && liveScopeMatches.value && formSubmitting.value && backgroundChecks.value<120){
     backgroundChecks.value++
     await liveSession.checkFormSubmission()

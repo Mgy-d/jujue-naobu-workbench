@@ -6,6 +6,8 @@ import net from 'node:net'
 
 const frontend = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const backend = resolve(process.env.TJDC_BACKEND_DIR || 'D:/Codex/projects/agents-backend-tjdc')
+const companyDatabase=existsSync(resolve(backend,'.env.company.local')) || process.env.SPRING_PROFILES_ACTIVE?.split(',').includes('company')
+const authMode=process.env.TJDC_AUTH_MODE || (companyDatabase?'remote':'local')
 const children = new Set()
 const checkOnly = process.argv.includes('--check')
 let stopping = false
@@ -123,19 +125,19 @@ async function dependency(service, name, internalPort, defaultPort, variable) {
 
 async function main() {
   if(process.argv.includes('--help')){
-    console.log('npm run dev:all       启动本机采集依赖、采集服务及公司联调前端\nnpm run dev:all -- --check  只检查环境\n首次运行请在 IDEA 环境变量中配置 TJDC_JWT_SECRET。可用 TJDC_BACKEND_DIR 指定采集仓库目录。\n停止运行会结束本次新建的程序进程，Docker 数据库与已运行服务继续保留。')
+    console.log('npm run dev:all       启动本机采集依赖、采集服务及公司联调前端\nnpm run dev:all -- --check  只检查环境\n公司数据库模式默认远程认证，无需共享签名密钥；local 模式需在 IDEA 配置 TJDC_JWT_SECRET。可用 TJDC_BACKEND_DIR 指定采集仓库目录。\n停止运行会结束本次新建的程序进程，Docker 数据库与已运行服务继续保留。')
     return
   }
   if(process.platform!=='win32')throw Error('当前一键入口使用 Windows PowerShell，请在本机 Windows 运行。')
   if(!existsSync(resolve(backend,'scripts/start-survey-local.ps1')))throw Error('未找到采集服务，请设置 TJDC_BACKEND_DIR。')
   if(!existsSync(resolve(frontend,'node_modules/vite/bin/vite.js')))throw Error('前端依赖不完整，请先安装项目依赖。')
   for(const variable of ['TJDC_DB_HOST','TJDC_REDIS_HOST']){
-    if(process.env[variable] && !['localhost','127.0.0.1','::1'].includes(process.env[variable]))throw Error(variable+' 指向远程服务，请核对本机一键启动配置。')
+    if(!(companyDatabase && variable==='TJDC_DB_HOST') && process.env[variable] && !['localhost','127.0.0.1','::1'].includes(process.env[variable]))throw Error(variable+' 指向远程服务，请核对本机一键启动配置。')
   }
   if(process.env.VITE_COLLECTION_TARGET && process.env.VITE_COLLECTION_TARGET.replace(/\/$/,'')!=='http://127.0.0.1:8090')throw Error('当前 VITE_COLLECTION_TARGET 指向其他服务，请使用本机 8090 地址运行此入口。')
   const reuse=await collectionReady()
   if(!reuse){
-    if(!process.env.TJDC_JWT_SECRET?.trim())throw Error('缺少 TJDC_JWT_SECRET。请在 IDEA 的此运行配置中设置与公司平台匹配的密钥，再重新启动。')
+    if(authMode!=='remote' && !process.env.TJDC_JWT_SECRET?.trim())throw Error('缺少 TJDC_JWT_SECRET。请在 IDEA 的此运行配置中设置与公司平台匹配的密钥，再重新启动。')
     if(await portOpen(8090))throw Error('8090 端口已占用，但问卷服务健康检查未通过，请核对已有进程。')
     await command('powershell.exe',['-NoProfile','-Command','if (!(Get-Command mvn -ErrorAction SilentlyContinue) -or !(Get-Command java -ErrorAction SilentlyContinue)) { exit 1 }'])
   }
@@ -149,11 +151,12 @@ async function main() {
   if(reuse)console.log('复用已就绪的本机问卷采集服务。')
   else {
     await command('docker',['info','--format','{{.ServerVersion}}'])
-    const dbPort=await dependency('postgres','agents-backend-tjdc-postgres',5432,5433,'TJDC_DB_PORT')
+    const dbPort=companyDatabase?String(process.env.TJDC_DB_PORT || '5432'):await dependency('postgres','agents-backend-tjdc-postgres',5432,5433,'TJDC_DB_PORT')
+    if(companyDatabase)console.log('使用公司数据库配置，跳过本机 PostgreSQL 启动。')
     const redisPort=await dependency('redis','agents-backend-tjdc-redis',6379,6379,'TJDC_REDIS_PORT')
     if(!checkOnly){
       console.log('启动问卷采集服务，首次 Maven 编译可能需要几分钟…')
-      launch('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',resolve(backend,'scripts/start-survey-local.ps1')],{cwd:backend,env:{...process.env,TJDC_DB_PORT:dbPort,TJDC_REDIS_PORT:redisPort,SERVER_PORT:'8090'}})
+      launch('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',resolve(backend,'scripts/start-survey-local.ps1')],{cwd:backend,env:{...process.env,TJDC_DB_PORT:dbPort,TJDC_REDIS_PORT:redisPort,TJDC_AUTH_MODE:authMode,TJDC_PLATFORM_URL:process.env.TJDC_PLATFORM_URL || process.env.COMPANY_BACKEND_URL || 'http://192.168.1.245:8084',SERVER_PORT:'8090'}})
       await waitFor(collectionReady,'问卷采集服务',180000)
     }
   }

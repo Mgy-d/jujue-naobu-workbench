@@ -24,7 +24,7 @@ async function request<T>(path:string,method='GET',body?:unknown,signal?:AbortSi
   if(!publicAccess && !sameAuth(auth))throw Error('账号已变化，请重新读取数据。')
   if(!response.ok){
     const error=await response.json().catch(()=>null)
-    throw new CollectionError(response.status===401?'问卷收集服务未接受当前登录，请核对服务端验签密钥与签发方配置。':error?.message || '问卷服务请求失败（'+response.status+'）',response.status)
+    throw new CollectionError(response.status===401?'问卷收集服务未接受当前登录，请重新登录或核对服务端认证/验签方式与平台地址配置。':error?.message || '问卷服务请求失败（'+response.status+'）',response.status)
   }
   return (bytes?await response.arrayBuffer():text?await response.text():await response.json()) as T
 }
