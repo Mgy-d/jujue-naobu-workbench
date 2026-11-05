@@ -80,3 +80,14 @@ test('G3 actions distinguish actual material gaps from statistics decisions and 
   assert.equal(researchG3Action({...base,currentWork:'统计执行中',nextStep:'等待团队确认统计执行'}).kind,'unknown')
   assert.equal(researchG3Action({...base,phase:'G2',nextStep:'等待团队确认统计执行'}),null)
 })
+
+
+test('observed approved G3 ledger exposes the G4 decision without automatically starting the report',async()=>{
+  const line='[进度] 阶段=G3（已通过） 完成=G1、G2、G3 全部闸门 进行中=无 剩余=团队补材料 10 项、G4 骨架 下步=等待团队确认是否进入 G4 状态=等待人工'
+  const progress={sessionId:'thread',phase:'G3',nextAction:'UNKNOWN',progressLine:line,lastText:'关于暂不执行统计：遵照执行，不会重跑统计。\n'+line,stallNow:false,hitlStuck:false}
+  await scenario({running:false},progress,async(run)=>assert.deepEqual(await run(),{running:false,phase:'G3',awaitingInput:true,nextStage:'G4'}))
+  await scenario({running:true},progress,async(run)=>assert.deepEqual(await run(),{running:true}))
+  for(const replacement of [line.replace('进行中=无','进行中=后台生成中'),line.replace('进入 G4','进入 G2'),line.replace('状态=等待人工','状态=执行中')]){
+    await scenario({running:false},{...progress,progressLine:replacement,lastText:replacement},async(run)=>assert.deepEqual(await run(),{running:false,phase:'G3',continuationUnknown:true}))
+  }
+})

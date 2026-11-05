@@ -552,3 +552,18 @@ test('short statistics wait cannot override newer user input, unverified gates, 
     assert.equal(s.status,mode==='running'?'working':'uncertain',mode)
   }
 })
+
+
+test('refresh of annotated G3 approval exposes G4 choice and only an explicit click issues a new request',async()=>{
+  const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+  await s.select(scope);await s.start('研究',{requireModelProbe:false})
+  d.runStatus=async()=>({running:false,continuationUnknown:true})
+  const line='[进度] 阶段=G3（已通过） 完成=G1、G2、G3全部闸门 进行中=无 剩余=团队补材料10项、G4骨架 下步=等待团队确认是否进入 G4 状态=等待人工'
+  d.transcript=async()=>({messages:[{id:'g3-end',role:'assistant',content:[{type:'text',text:line}]}]})
+  let sends=0
+  d.run=async()=>{sends++;return {status:'success',message:'',texts:{reply:'收到G4骨架请求'},interrupts:[]}}
+  await s.recover({readOnly:true})
+  assert.equal(sends,0);assert.equal(s.status,'awaiting');assert.equal(s.nextStage,'G4')
+  await s.start('确认进入 G4',{requireModelProbe:false,allowIdleMessage:true})
+  assert.equal(sends,1)
+})

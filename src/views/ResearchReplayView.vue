@@ -133,7 +133,7 @@
             </div>
             <section v-if="chips.length" class="next-action-card" aria-label="需要你操作">
               <div class="next-action-heading"><span aria-hidden="true">→</span><strong>需要你操作</strong></div>
-              <p>{{task && liveSession.serverPhase==='G3' ? g3Action?.description || '请先核对当前等待的具体事项。' : '请选择下一步，点击后会发送到当前对话。'}}</p>
+              <p>{{liveSession.nextStage ? '当前等待确认是否进入 '+liveSession.nextStage+'。请核对已有回复中的风险和待确认事项后选择。' : task && liveSession.serverPhase==='G3' ? g3Action?.description || '请先核对当前等待的具体事项。' : '请选择下一步，点击后会发送到当前对话。'}}</p>
               <div class="conversation-actions">
                 <button v-for="chip in chips" :key="chip" type="button" class="conversation-action primary" :disabled="task ? liveSession.busy || materialBusy : thinkingOn" @click="quickSay(chip)">{{chip}}</button>
               </div>
@@ -474,7 +474,7 @@ const stagText=computed(()=>{
     if(liveSession.status==='interrupt')return '待填写或确认'
     if(liveSession.status==='uncertain')return '待核对'
     if(liveSession.status==='working')return '后台待核对'
-    if(liveSession.status==='awaiting')return liveSession.serverPhase==='G3' ? g3Action.value?.badge || '待确认下一步' : '待输入'
+    if(liveSession.status==='awaiting')return liveSession.nextStage ? '待确认进入 '+liveSession.nextStage : liveSession.serverPhase==='G3' ? g3Action.value?.badge || '待确认下一步' : '待输入'
     if(liveSession.status==='finished')return '本轮结束'
     return '待输入'
   }
@@ -488,8 +488,8 @@ const chips=computed<string[]>(()=>{
   if(task.value){
     if(!liveScopeMatches.value)return []
     if(liveSession.halted||latestGateTimedOut.value||liveSession.busy||liveForms.value.length||['uncertain','working','running','interrupt'].includes(liveSession.status))return []
-    if(liveSession.status==='awaiting' && liveSession.serverPhase==='G3')return [g3Action.value?.label || '查看当前需要确认的事项']
     if(liveSession.status==='awaiting' && liveSession.nextStage)return ['确认进入 '+liveSession.nextStage,'先说明需要修订的内容']
+    if(liveSession.status==='awaiting' && liveSession.serverPhase==='G3')return [g3Action.value?.label || '查看当前需要确认的事项']
     return ['请结合题目梳理研究问题和方法','继续下一步']
   }
   if(finished.value)return ['重新复现一遍','回看全局分析']
@@ -1013,6 +1013,10 @@ function send(){
 function quickSay(chip:string){
   scrollBottom(true)
   if(task.value){
+    if(chip==='确认进入 G4' && liveSession.nextStage==='G4'){
+      void sendLive('确认进入 G4，仅启动当前会话允许的报告骨架与图表清单整理，沿用已有统计结果，暂不重新执行统计。保留所有待补材料、待确认分析计划和结论边界；报告正文与讲稿由团队完成。')
+      return
+    }
     const action=g3Action.value
     void sendLive(action && chip===action.label ? action.message : chip)
     return
@@ -1474,7 +1478,10 @@ watch(()=>[route.params.id,route.query.task],()=>{if(route.name==='research-repl
 @media(prefers-reduced-motion:reduce){.drawer .dl,.drawer .icon-btn,.drawer .artifact-file{transition:none}.drawer .dl:not(:disabled):hover,.drawer .dl:not(:disabled):active,.drawer .icon-btn:hover,.drawer .icon-btn:active,.drawer .artifact-file:hover{transform:none}}
 .anim-empty{padding:26px 20px;border:1px dashed var(--blue-200);border-radius:12px;background:#fff;font-size:12.8px;color:var(--ink3);line-height:1.8}
 
-.message-markdown{overflow-wrap:anywhere}
+.message-markdown{overflow-wrap:anywhere;line-height:1.85}
+.message-markdown :deep(ul>li::before){content:none}
+.message-markdown :deep(blockquote p){margin:0}
+.message-markdown :deep(th){font-weight:700;color:var(--ink)}
 .message-markdown :deep(p){margin:0 0 10px}
 .message-markdown :deep(p:last-child){margin-bottom:0}
 .message-markdown :deep(h1),.message-markdown :deep(h2),.message-markdown :deep(h3),.message-markdown :deep(h4){margin:16px 0 8px;font-size:15px;line-height:1.6;color:var(--ink)}

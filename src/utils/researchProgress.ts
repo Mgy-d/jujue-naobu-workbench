@@ -12,7 +12,7 @@ export function readResearchProgress(text: string): ResearchProgressHint | null 
   const marker = text.lastIndexOf('[进度]')
   if (marker < 0) return null
   const line = text.slice(marker).trim().replace(/＝/g, '=')
-  const fields = /^\[进度\]\s*阶段\s*=\s*(G[1-4])\s*完成\s*=\s*([\s\S]*?)\s*进行中\s*=\s*([\s\S]*?)\s*剩余\s*=\s*([\s\S]*?)\s*下步\s*=\s*([\s\S]*?)\s*状态\s*=\s*([^\r\n]+)\s*$/u.exec(line)
+  const fields = /^\[进度\]\s*阶段\s*=\s*(G[1-4])(?:\s*[（(](?:已通过|已完成|待确认|待审核)[）)])?\s*完成\s*=\s*([\s\S]*?)\s*进行中\s*=\s*([\s\S]*?)\s*剩余\s*=\s*([\s\S]*?)\s*下步\s*=\s*([\s\S]*?)\s*状态\s*=\s*([^\r\n]+)\s*$/u.exec(line)
   if (!fields) return null
   const phase = fields[1]!
   const currentWork = fields[3]!.replace(/\s+/g, '')
@@ -20,9 +20,10 @@ export function readResearchProgress(text: string): ResearchProgressHint | null 
   const state = fields[6]!.trim()
   const nextStage = 'G' + (Number(phase.slice(1)) + 1)
   const summary = {phase,currentWork:fields[3]!.trim(),nextStep:fields[5]!.trim(),state}
-  if (currentWork === '无' && state === '部分完成'
+  const requestedStage=/^等待(?:团队|用户)?确认(?:是否)?进入(G[2-4])$/u.exec(nextStep)?.[1]
+  if (currentWork === '无' && ['部分完成','等待人工'].includes(state)
       && ['G2', 'G3', 'G4'].includes(nextStage)
-      && nextStep === '等待确认是否进入' + nextStage) {
+      && requestedStage === nextStage) {
     return {...summary, awaitingInput: true, nextStage}
   }
   const awaitingTeamItems = phase === 'G2'
