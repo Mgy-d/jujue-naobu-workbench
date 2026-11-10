@@ -1,9 +1,11 @@
+import {canMessageCompletedResearch} from '@/utils/researchConversationReadiness'
+import { isUnresolvedInterruptsError } from '@/api/interruptRelease'
 import { readResearchProgress, type ResearchProgressHint } from '@/utils/researchProgress'
-import { buildResearchRequest, matchingBackgroundRuns, normalizeResearchInterrupt, reconcileResearchPending, streamResearchRun, successfulResearchHitlIds, conflictingResearchHitlIds } from '@/api/szRun'
+import { buildResearchRequest, recoverResearchPlan, matchingBackgroundRuns, sameResearchToolInput, normalizeResearchInterrupt, reconcileResearchPending, streamResearchRun, successfulResearchHitlIds, conflictingResearchHitlIds } from '@/api/szRun'
 import { reactive, markRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { getAccessToken } from '@/api/http'
-import { extractInterrupts } from '@/api/agui'
+import { extractInterrupts, runEventError } from '@/api/agui'
 import { verifyResearchAgent, interruptResearchSession, fetchResearchRunStatus, fetchResearchRecoveryEvents, type ResearchSessionStatus } from '@/api/researchAgent'
 import { fetchSessionTranscript, fetchSessionProgress, mergeTranscript, type SessionProgress } from '@/api/session'
 import { listPendingInterrupts, listLiveInterruptIds, registerInterrupts, removePendingInterrupt } from '@/api/formInterrupt'
@@ -25,6 +27,7 @@ export interface ResearchRunServices {
   transcript: (agentId:string,threadId:string) => Promise<{messages:SessionTextMessage[]}>
   pending: (agentId:string,threadId:string) => Promise<AguiInterrupt[]>
   events?: (threadId:string) => Promise<Array<{runId?:string;payload:AguiEvent}>>
+  historyEvents?: (threadId:string) => Promise<Array<{runId?:string;payload:AguiEvent}>>
   live?: (agentId:string,threadId:string) => Promise<string[] | null>
   stop?: (agentId:string,threadId:string) => Promise<{session_id:string;interrupted:boolean}>
   runStatus: (agentId:string,threadId:string) => Promise<ResearchSessionStatus>
@@ -58,12 +61,22 @@ export class ResearchRunSession {
   lastStatusCheckAt = ''
   serverPhase = ''
   nextStage = ''
+  recoveryDiagnostic:Record<string,unknown>|null=null
   status:State = 'idle'; error = ''; notice = ''; probeText = ''; probePassed = false
   messages:ResearchMessage[] = []; interrupts:AguiInterrupt[] = []; artifacts:ArtifactNode[] = []; preview:ArtifactContent|null = null
   formSubmission:FormSubmissionFeedback|null = null
   busy = false; stopping = false; halted = false
   private epoch = 0; private controller:AbortController|null = null; private verifiedKey = ''
   constructor(private storage:Pick<Storage,'getItem'|'setItem'>, private services:ResearchRunServices, private owner:()=>string, private uuid:()=>string = ()=>crypto.randomUUID()) {}
+  private pendingRecoveryMessage() {
+    return '服务端报告原会话仍有未处理的确认事项，请先恢复待答表单；本次不能作为普通对话继续。'
+  }
+  private recordPendingRejection() {
+    if (this.identity) this.persist({...this.identity, status:'uncertain', unresolvedInterrupts:true})
+    this.status='uncertain';this.nextStage='';this.interrupts=[]
+    this.error=this.pendingRecoveryMessage()
+    this.notice='本次请求被服务端拒绝，未开始新的回复；没有自动重试或处理审核。'
+  }
   private active(epoch:number) { return epoch===this.epoch && !!this.scope && this.scope.ownerId===this.owner() }
   private persist(next:StoredResearchIdentity) {
     if (!this.scope || this.owner()!==this.scope.ownerId) throw new Error('登录账户已变化，运行身份未写入。')
@@ -71,11 +84,11 @@ export class ResearchRunSession {
     this.identity=next
   }
   private invalidate() { this.formSubmission=null;this.epoch++;this.controller?.abort();this.controller=null;this.busy=false;this.stopping=false }
-  dispose() { this.reportedProgress=null;this.lastStatusCheckAt='';this.serverPhase='';this.nextStage='';this.invalidate();this.verifiedKey='';this.probePassed=false;this.scope=null;this.identity=null;this.halted=false;this.messages=[];this.interrupts=[];this.artifacts=[];this.preview=null }
+  dispose() { this.recoveryDiagnostic=null;this.reportedProgress=null;this.lastStatusCheckAt='';this.serverPhase='';this.nextStage='';this.invalidate();this.verifiedKey='';this.probePassed=false;this.scope=null;this.identity=null;this.halted=false;this.messages=[];this.interrupts=[];this.artifacts=[];this.preview=null }
   async select(scope:ResearchScope) {
     if(this.scope && this.scope.ownerId===scope.ownerId && this.scope.agentId===scope.agentId && this.scope.taskId===scope.taskId && this.owner()===scope.ownerId)return
     this.invalidate()
-    this.scope={...scope};this.reportedProgress=null;this.lastStatusCheckAt='';this.serverPhase='';this.nextStage='';this.halted=false;this.identity=null;this.baseline=null;this.messages=[];this.interrupts=[];this.artifacts=[];this.preview=null;this.error='';this.notice='';this.status='idle'
+    this.recoveryDiagnostic=null;this.scope={...scope};this.reportedProgress=null;this.lastStatusCheckAt='';this.serverPhase='';this.nextStage='';this.halted=false;this.identity=null;this.baseline=null;this.messages=[];this.interrupts=[];this.artifacts=[];this.preview=null;this.error='';this.notice='';this.status='idle'
     this.probePassed=this.verifiedKey===scope.ownerId+':'+scope.agentId
     if (scope.ownerId!==this.owner()) { this.error='登录账户已变化，请重新登录。';this.status='uncertain';return }
     try { const loaded=loadResearchIdentity(this.storage,scope);this.identity=loaded.identity;this.baseline=loaded.baseline }
@@ -100,6 +113,7 @@ export class ResearchRunSession {
   }
   async start(text:string, options: {requireModelProbe?:boolean;allowIdleMessage?:boolean;recoverExpiredGate?:boolean} = {}) {
     if (!this.scope || this.busy || this.stopping || this.halted || !text.trim()) return
+    if (this.identity?.unresolvedInterrupts) {this.status='uncertain';this.error=this.pendingRecoveryMessage();this.notice='请先核对原会话的待答表单，当前内容未发送。';return}
     if (options.requireModelProbe !== false && !this.probePassed) {this.error='请先测试模型响应，再启动研究。';return}
     if (this.status==='interrupt' || this.status==='working' || this.status==='uncertain' && !options.allowIdleMessage || this.status==='running') {this.error='当前运行仍待确认或核对，请先恢复会话。';return}
     const epoch=this.epoch, scope={...this.scope};this.busy=true;this.nextStage='';this.error='';this.notice='正在核对智能体和会话，尚未发送本次内容。'
@@ -111,7 +125,19 @@ export class ResearchRunSession {
         const [pending,status,live]=await Promise.all([this.services.pending(scope.agentId,this.identity.threadId),this.services.runStatus(scope.agentId,this.identity.threadId),options.allowIdleMessage && this.services.live ? this.services.live(scope.agentId,this.identity.threadId) : Promise.resolve([])])
         if(!this.active(epoch))return
         if(pending.length || live?.length || status.running || status.pendingWork || status.continuationPlanned) throw new Error('会话仍在运行或存在待确认内容，请先恢复会话。')
-        if(status.continuationUnknown || options.allowIdleMessage && (live===null || this.status==='uncertain')){
+        let completedConversation=false
+        if(status.completedRun && options.allowIdleMessage){
+          const transcript=await this.services.transcript(scope.agentId,this.identity.threadId)
+          if(!this.active(epoch) || !this.identity)return
+          if(!canMessageCompletedResearch(transcript.messages,this.identity))throw Error('本轮已结束，但历史表单或工具的终态仍无法核实；本次内容未发送，请核对原会话。')
+          completedConversation=true
+        }
+        if(status.manualAttention){
+          const transcript=await this.services.transcript(scope.agentId,this.identity.threadId)
+          if(!this.active(epoch) || !this.identity)return
+          if(!options.allowIdleMessage || !this.manualResumeClear(transcript.messages,this.identity))throw Error('人工接续前仍需核对原会话的工具结果和审核状态，当前内容未发送。')
+        }
+        if(!completedConversation && (status.continuationUnknown || options.allowIdleMessage && (live===null || this.status==='uncertain'))){
           const transcript = await this.services.transcript(scope.agentId,this.identity.threadId)
           if(!this.active(epoch) || !this.identity)return
           const expiredRecovery=options.recoverExpiredGate===true && options.allowIdleMessage===true
@@ -137,7 +163,7 @@ export class ResearchRunSession {
       const result=await this.services.run(runIdentity,request,event=>this.onEvent(epoch,runIdentity,event),ctl.signal)
       if(!this.active(epoch))return
       await this.applyResult(epoch,result,[])
-    } catch(e) { if(!this.active(epoch))return;this.status='uncertain';this.notice=issued?'本次请求已发出，结果需要核对。':'本次内容尚未发送，已保留输入。';this.error=description(e)+(issued?' 当前运行结果需核对，未自动重试。':'');if(this.identity && this.identity.status==='running'){try{this.persist({...this.identity,status:'uncertain'})}catch{}} }
+    } catch(e) { if(!this.active(epoch))return;if(isUnresolvedInterruptsError(description(e))){this.recordPendingRejection();return}this.status='uncertain';this.notice=issued?'本次请求已发出，结果需要核对。':'本次内容尚未发送，已保留输入。';this.error=description(e)+(issued?' 当前运行结果需核对，未自动重试。':'');if(this.identity && this.identity.status==='running'){try{this.persist({...this.identity,status:'uncertain'})}catch{}} }
     finally{if(this.active(epoch)){this.busy=false;this.controller=null}}
   }
   private onEvent(epoch:number, identity:ResearchIdentity, event:AguiEvent) {
@@ -195,6 +221,14 @@ export class ResearchRunSession {
       const toolId=id.split(':').slice(1).join(':')
       return !!toolId && successful.has(toolId)
     })
+  }
+  private manualResumeClear(messages:SessionTextMessage[],identity:StoredResearchIdentity) {
+    if(!this.recordedFormsResolved(messages,identity))return false
+    const resolved=collectResolvedToolCallIds(messages as never[])
+    return !messages.some(message=>message.content.some(block=>{
+      const call=block as {type:string;id?:string}
+      return call.type==='tool_call' && (!call.id || !resolved.has(call.id))
+    }))
   }
   private confirmedInputHint(messages:SessionTextMessage[],identity:StoredResearchIdentity) {
     const latest = messages.filter(message =>
@@ -254,6 +288,7 @@ export class ResearchRunSession {
       if(!this.active(epoch))return false
       const toolId=item.toolCallId || idOf(item).split(':').slice(1).join(':')
       if(!toolId || newIds.has(toolId)){this.halt('新旧表单身份无法区分，已停止清理和继续；请交平台核查。');return false}
+      if(item.metadata?.toolName==='plan_exit' && item.metadata.recoveredPlan===true)continue
       try{await this.services.remove(scope.agentId,thread,toolId)}
       catch{if(this.active(epoch))this.halt('已答表单登记清理失败；已停止继续和刷新恢复，请交平台核查。');return false}
       if(!this.active(epoch))return false
@@ -269,7 +304,7 @@ export class ResearchRunSession {
       if(!ids.length || ids.some(id=>!id) || new Set(ids).size!==ids.length) throw new Error('中断身份不完整，不能安全继续。')
       for(const item of result.interrupts)normalizeResearchInterrupt(item)
       this.rememberFormPhase(result.interrupts)
-      this.persist({...this.identity,status:'interrupt',pendingIds:ids})
+      this.persist({...this.identity,status:'interrupt',pendingIds:ids,unresolvedInterrupts:false})
       this.interrupts=result.interrupts;this.status='interrupt';this.notice='等待填写表单；提交会沿用原会话和原运行。'
       try {await this.services.register(this.scope.agentId,this.identity.threadId,result.interrupts,this.identity.runId)}
       catch {if(this.active(epoch))this.error='待答表单登记失败；刷新后可能无法恢复，请先核对服务。'}
@@ -277,7 +312,14 @@ export class ResearchRunSession {
       await this.cleanupConsumed(epoch,submitted,result.interrupts)
       return
     }
-    if(result.status!=='success') {this.persist({...this.identity,status:'uncertain'});this.status='uncertain';this.error=result.message || '运行没有明确成功终态，请核对会话。';return}
+    if(result.status!=='success') {
+      if(isUnresolvedInterruptsError(result.message)){this.recordPendingRejection();return}
+      this.persist({...this.identity,status:'uncertain'});this.status='uncertain'
+      this.error=result.message || '运行没有明确成功终态，请核对会话。'
+      this.notice='本次运行结果尚未确认，请核对会话；没有自动重试。'
+      return
+    }
+    if(submitted.length && this.identity.unresolvedInterrupts)this.persist({...this.identity,unresolvedInterrupts:false})
     // Delete only confirmed consumed IDs, never the session-wide registry and never a new gate.
     if(!await this.cleanupConsumed(epoch,submitted,[]) || !this.active(epoch) || !this.scope || !this.identity)return
     this.interrupts=[]
@@ -316,7 +358,16 @@ export class ResearchRunSession {
       const [serverPending,live]=await Promise.all([this.services.pending(scope.agentId,identity.threadId),this.services.live?this.services.live(scope.agentId,identity.threadId):Promise.resolve(null)])
       if(!this.active(epoch))return
       const expected=previous.map(idOf).sort(), actual=serverPending.map(idOf).sort()
-      if(expected.length!==actual.length || expected.some((id,i)=>id!==actual[i]) || live!==null && (live.length!==expected.length || [...live].sort().some((id,i)=>id!==expected[i]))) throw Error('服务端待答表单已变化，请恢复会话核对，未提交任何答复。')
+      let provenUnregisteredPlan=false
+      if(!serverPending.length && previous.length===1 && previous[0]!.metadata?.toolName==='plan_exit' && previous[0]!.metadata.recoveredPlan===true && this.services.historyEvents){
+        const [transcript,history,state]=await Promise.all([this.services.transcript(scope.agentId,identity.threadId),this.services.historyEvents(identity.threadId),this.services.runStatus(scope.agentId,identity.threadId)])
+        if(!this.active(epoch))return
+        const proof=recoverResearchPlan(transcript.messages,history,identity.threadId)
+        provenUnregisteredPlan=!!proof && proof.runId===identity.runId && !state.running && !state.pendingWork
+          && JSON.stringify(proof.interrupts.map(item=>({id:idOf(item),input:item.metadata?.toolInput})))===JSON.stringify(previous.map(item=>({id:idOf(item),input:item.metadata?.toolInput})))
+        if(!provenUnregisteredPlan)throw Error('待确认计划或运行身份已变化，未提交任何答复。')
+      }
+      if(!provenUnregisteredPlan && (expected.length!==actual.length || expected.some((id,i)=>id!==actual[i])) || live!==null && (live.length!==expected.length || [...live].sort().some((id,i)=>id!==expected[i]))) throw Error('服务端待答表单已变化，请恢复会话核对，未提交任何答复。')
       if(serverPending.some(item=>typeof item.metadata?.runId==='string' && item.metadata.runId && item.metadata.runId!==identity.runId)) throw Error('服务端待答表单的运行身份不匹配，未提交。')
       if(!this.identity)throw Error('运行身份已失效。')
       this.persist({...this.identity,status:'submitting',submittedIds:[...new Set([...this.identity.submittedIds,...previous.map(idOf)])]})
@@ -329,7 +380,7 @@ export class ResearchRunSession {
         this.formSubmission.lastEventAt=Date.now()
       }
       await this.applyResult(epoch,result,previous)
-    } catch(e){if(!this.active(epoch))return;if(issued){this.status='uncertain';this.error='提交结果未确认，请先恢复会话核对，不要重复提交。'+description(e);if(this.identity)try{this.persist({...this.identity,status:'uncertain'})}catch{}}else{this.status='interrupt';this.error=description(e)}}
+    } catch(e){if(!this.active(epoch))return;if(isUnresolvedInterruptsError(description(e))){this.recordPendingRejection();return}if(issued){this.status='uncertain';this.error='提交结果未确认，请先恢复会话核对，不要重复提交。'+description(e);if(this.identity)try{this.persist({...this.identity,status:'uncertain'})}catch{}}else{this.status='interrupt';this.error=description(e)}}
     finally{if(this.active(epoch)){
       if(this.formSubmission)this.formSubmission.settledAt=Date.now()
       this.busy=false;this.controller=null
@@ -417,7 +468,7 @@ export class ResearchRunSession {
   }
   async recover(options: {readOnly?:boolean} = {}) {
     if(!this.scope || !this.identity || !this.identity.runId || this.busy || this.stopping || this.halted)return
-    const epoch=this.epoch, scope={...this.scope}, identity={...this.identity};this.busy=true;this.error='';this.notice='正在核对会话、待答表单和运行状态。'
+    const epoch=this.epoch, scope={...this.scope}, identity={...this.identity};this.recoveryDiagnostic=null;this.busy=true;this.error='';this.notice='正在核对会话、待答表单和运行状态。'
     if(!options.readOnly)await this.reconcileSubmitted()
     if(!this.active(epoch) || this.halted){if(this.active(epoch))this.busy=false;return}
     try {
@@ -440,7 +491,8 @@ export class ResearchRunSession {
       // Keep readable messages even if a separate status/pending request failed.
       if(pendingResult.status==='rejected')throw pendingResult.reason
       if(statusResult.status==='rejected')throw statusResult.reason
-      const pending=pendingResult.value, status=statusResult.value
+      let pending=pendingResult.value
+      const status=statusResult.value
       this.lastStatusCheckAt=new Date().toISOString()
       this.serverPhase=status.phase || this.serverPhase
       if(progressResult.status==='fulfilled' && progressResult.value?.sessionId===identity.threadId){
@@ -448,6 +500,40 @@ export class ResearchRunSession {
         const report=readResearchProgress(snapshot.progressLine || snapshot.lastText || '')
         if(report){this.reportedProgress=report;this.serverPhase=report.phase}
         if(['G1','G2','G3','G4'].includes(snapshot.phase || ''))this.serverPhase=snapshot.phase!
+      }
+      const hasAskingPlan=transcript.messages.some(message=>message.content.some(value=>{
+        const block=value as {type:string;name?:string;state?:string}
+        return message.role==='assistant' && block.type==='tool_call' && block.name==='plan_exit' && block.state==='asking'
+      }))
+      if(!pending.length && hasAskingPlan && this.services.historyEvents && !status.running && !status.pendingWork){
+        const history=await this.services.historyEvents(identity.threadId)
+        if(!this.active(epoch))return
+        const proof=recoverResearchPlan(transcript.messages,history,identity.threadId)
+        if(proof){
+          identity.runId=proof.runId;identity.pendingIds=proof.interrupts.map(idOf);identity.status='interrupt'
+          pending=proof.interrupts
+          this.persist(identity)
+        }
+      }
+      // Pre-fix clients did not persist this marker. Recover it only from this exact run's server event.
+      if(identity.unresolvedInterrupts===undefined && !pending.length && (identity.status==='uncertain' || this.status==='uncertain') && this.services.events){
+        const records=await this.services.events(identity.threadId).catch(()=>null)
+        if(!this.active(epoch))return
+        if(records?.some(record=>record.runId===identity.runId && record.payload.threadId===identity.threadId
+          && record.payload.runId===identity.runId && isUnresolvedInterruptsError(runEventError(record.payload) || ''))){
+          identity.unresolvedInterrupts=true
+          this.persist({...identity,status:'uncertain'})
+        }
+      }
+      // A registry miss must not erase the server's explicit unresolved-interrupt rejection.
+      if(identity.unresolvedInterrupts && !pending.length){
+        const live = this.services.live ? await this.services.live(scope.agentId,identity.threadId) : null
+        if(!this.active(epoch))return
+        if(live===null)throw Error('服务端曾报告未决待办，但待答登记未返回表单，实时待办接口不可用。请保留原会话，核对平台待办状态。')
+        if(live.length)throw Error('服务端仍有 '+live.length+' 项未决待办，但未返回可填写的表单。请核对原会话的待答内容，不能重复发送继续指令。')
+        if(!status.running && !status.pendingWork && !status.continuationPlanned && this.identity){
+          this.persist({...this.identity,unresolvedInterrupts:false})
+        }
       }
       // A resume can still own its SDK registration while the model is running.
       // Keep submitted IDs and wait for an idle snapshot before judging revival.
@@ -463,18 +549,43 @@ export class ResearchRunSession {
       const unknown=pending.filter(item=>!identity.pendingIds.includes(idOf(item)) && !identity.submittedIds.includes(idOf(item)) && item.metadata?.runId!==identity.runId && !resolved.has(String(item.toolCallId || idOf(item).split(':').slice(1).join(':'))))
       let confirmedIdentity=identity
       if(unknown.length) {
-        if(!this.services.events)throw Error('待答表单缺少可核对的运行身份。')
-        const events=await this.services.events(identity.threadId)
-        if(!this.active(epoch))return
-        const matches=matchingBackgroundRuns(events,identity.threadId,pending)
-        for(const record of events){
-          const event=record.payload, run=record.runId
-          if(!run || event.type!=='RUN_FINISHED' || (event.outcome as {type?:string}|undefined)?.type!=='interrupt')continue
-          if(typeof event.threadId==='string' && event.threadId!==identity.threadId || typeof event.runId==='string' && event.runId!==run)continue
-          const ids=extractInterrupts(event).map(idOf)
-          if(pending.every(item=>ids.includes(idOf(item))))matches.add(run)
+        const findMatches=(events:Array<{runId?:string;payload:AguiEvent}>)=>{
+          const matches=matchingBackgroundRuns(events,identity.threadId,pending)
+          for(const record of events){
+            const event=record.payload,run=record.runId
+            if(!run||event.type!=='RUN_FINISHED'||(event.outcome as {type?:string}|undefined)?.type!=='interrupt')continue
+            if(event.threadId!==identity.threadId||typeof event.runId==='string'&&event.runId!==run)continue
+            const items=extractInterrupts(event)
+            if(pending.every(item=>items.some(candidate=>idOf(candidate)===idOf(item)&&String(candidate.toolCallId||idOf(candidate).split(':').slice(1).join(':'))===String(item.toolCallId||idOf(item).split(':').slice(1).join(':'))&&candidate.metadata?.toolName===item.metadata?.toolName&&sameResearchToolInput(candidate.metadata?.toolInput,item.metadata?.toolInput))))matches.add(run)
+          }
+          return matches
         }
-        if(matches.size!==1)throw Error('待答表单缺少可核对的运行身份。')
+        let recent:Array<{runId?:string;payload:AguiEvent}>=[]
+        try{if(this.services.events)recent=await this.services.events(identity.threadId)}catch{if(!this.services.historyEvents)throw Error('待答表单缺少可核对的运行身份。')}
+        if(!this.active(epoch))return
+        let inspected=recent
+        let matches=findMatches(recent)
+        // The current watermark may point at a later background run than the pending form.
+        // Search same-session history only when the latest window supplies no binding.
+        if(matches.size===0&&this.services.historyEvents){
+          const history=await this.services.historyEvents(identity.threadId)
+          if(!this.active(epoch))return
+          inspected=history;matches=findMatches(history)
+        }
+        if(matches.size!==1){
+          const toolIds=new Set(pending.map(item=>String(item.toolCallId||idOf(item).split(':').slice(1).join(':'))))
+          const relevant=inspected.filter(record=>{
+            const event=record.payload
+            return toolIds.has(String(event.toolCallId||''))||extractInterrupts(event).some(item=>toolIds.has(String(item.toolCallId||idOf(item).split(':').slice(1).join(':'))))
+          })
+          const runs=new Set(relevant.map(record=>record.runId).filter(Boolean))
+          const select=(record:{runId?:string;payload:AguiEvent})=>{
+            const e=record.payload
+            return {recordRunId:record.runId,type:e.type,threadId:e.threadId,runId:e.runId,toolCallId:e.toolCallId,toolCallName:e.toolCallName,delta:e.type==='TOOL_CALL_ARGS'?e.delta:undefined,interrupts:extractInterrupts(e).map(item=>({id:idOf(item),toolCallId:item.toolCallId,metadata:item.metadata})),outcomeType:(e.outcome as {type?:string}|undefined)?.type}
+          }
+          this.recoveryDiagnostic={version:1,capturedAt:new Date().toISOString(),threadId:identity.threadId,originalRunId:identity.runId,pending:pending.map(item=>({id:idOf(item),toolCallId:item.toolCallId,metadata:item.metadata})),scannedEvidence:inspected.length,matchedRuns:[...matches],eventTypes:inspected.reduce((counts,record)=>{const type=String(record.payload.type);counts[type]=(counts[type]||0)+1;return counts},{} as Record<string,number>),targetEvents:relevant.map(select),runBoundaryEvents:inspected.filter(record=>runs.has(record.runId)&&['RUN_STARTED','RUN_FINISHED','RUN_ERROR'].includes(String(record.payload.type))).map(select)}
+          throw Error('后台表单尚未恢复：已核对 '+inspected.length+' 条运行/工具记录，找到 '+relevant.length+' 条目标工具事件，可确认的运行 '+matches.size+' 个。未提交，请导出核对信息定位。')
+        }
         confirmedIdentity={...identity,runId:[...matches][0]!,pendingIds:pending.map(idOf),status:'interrupt'}
       }
       const recovered=reconcileResearchPending(pending,resolved,confirmedIdentity)
@@ -485,6 +596,22 @@ export class ResearchRunSession {
         this.status='interrupt';this.notice='已恢复待答表单，请核对后继续。';return
       }
       if(status.running || status.pendingWork){this.status='working';this.notice='运行接口报告会话仍在运行，当前没有返回待答表单；下方进度为会话最近报告的记录。';return}
+      if(status.completedRun){
+        const live=this.services.live ? await this.services.live(scope.agentId,identity.threadId) : null
+        if(!this.active(epoch))return
+        if(live?.length)throw Error('当前仍有待答事项，请先恢复表单。')
+        if(!canMessageCompletedResearch(transcript.messages,identity))throw Error('本轮已结束，但历史表单或工具的终态仍无法核实，请核对原会话；未自动继续或提交。')
+        this.status='awaiting';this.error='';this.notice='当前回复已结束，可以在原对话补充材料或继续提问。'
+        return
+      }
+      if(status.manualAttention){
+        if(!this.manualResumeClear(transcript.messages,identity))throw Error('平台已停止自动补醒，但原会话仍有未核实的工具或审核结果，请先核对待答事项。')
+        const live=this.services.live ? await this.services.live(scope.agentId,identity.threadId) : null
+        if(!this.active(epoch))return
+        if(live?.length)throw Error('原会话仍有实时待答事项，请先恢复对应表单。')
+        this.status='awaiting';this.error='';this.notice='平台已停止自动补醒，当前会话及后台任务均空闲。可以在原对话发送说明或补充材料；研究阶段仍需人工确认。'
+        return
+      }
       if(status.continuationPlanned){this.status='working';this.notice='进度台账仍有待推进工作；这不代表子任务当前仍在执行，请核对会话。';return}
       if(status.continuationUnknown){
         const hint = this.confirmedInputHint(transcript.messages,identity)
@@ -567,6 +694,7 @@ const liveServices:ResearchRunServices={
   transcript:fetchSessionTranscript,
   pending:listPendingInterrupts,
   events:fetchResearchRecoveryEvents,
+  historyEvents:threadId=>fetchResearchRecoveryEvents(threadId,true),
   runStatus:fetchResearchRunStatus,
   progress:(agentId,threadId)=>fetchSessionProgress(agentId,threadId,5000),
   register:registerInterrupts,

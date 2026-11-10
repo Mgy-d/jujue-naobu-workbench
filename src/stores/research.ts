@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import {AUTH_MODE} from '@/api/http';
-import {researchCloud,researchCloudOwner} from '@/api/researchCloud';
+import {researchCloud,researchCloudOwner,syncOwnedLocalRecords} from '@/api/researchCloud';
 import {TASK_STORAGE_KEY,emptyTaskRegistry,cleanTask} from '@/utils/researchDrafts';
 import { defineStore } from 'pinia';
 import type { CompetitionDraft, DraftContext, LocalResearchTask, WorkflowKind, SandboxReference, SelectedInputMetadata, ResearchStageDraftUpdate, QuestionnaireDraftUpdate } from '../types/research-contracts';
@@ -9,6 +9,7 @@ export const useResearchStore = defineStore('research-tasks', () => {
     const cloudOwner=ref(AUTH_MODE==='real'?researchCloudOwner():'');
     const cloudStatus=ref<'local'|'loading'|'ready'|'saving'|'error'>(cloudOwner.value?'loading':'local');
     const cloudError=ref('');
+    const historySyncIssues=ref<string[]>([]);
     let connectionGeneration=0, connectedOwner='', connecting:Promise<void>|null=null;
     const pending=new Set<string>();
     const pendingKey=()=> 'shidiaoyanzhen.cloud-pending.v1:'+cloudOwner.value;
@@ -28,7 +29,7 @@ export const useResearchStore = defineStore('research-tasks', () => {
         if(connectedOwner===owner)return connecting || undefined;
         clearTimeout(autosaveTimer);
         const generation=++connectionGeneration;
-        cloudOwner.value=owner;connectedOwner=owner;researchCloud.select(owner);pending.clear();draft.value=null;
+        historySyncIssues.value=[];cloudOwner.value=owner;connectedOwner=owner;researchCloud.select(owner);pending.clear();draft.value=null;
         if(!owner){registry.value=emptyTaskRegistry();cloudStatus.value='local';return;}
         const cached=loadTaskRegistry(storage);registry.value=cached.registry;
         try{for(const id of JSON.parse(localStorage.getItem(pendingKey())||'[]'))pending.add(id);}catch{}
@@ -55,7 +56,8 @@ export const useResearchStore = defineStore('research-tasks', () => {
                 for(const id of pending)if(registry.value.tasks[id])next.tasks[id]=registry.value.tasks[id]!;
                 const text=JSON.stringify(next);storage.setItem(TASK_STORAGE_KEY,text);next.baseline=text;registry.value=next;
                 cloudStatus.value='ready';
-                for(const id of pending)void syncTask(id);
+                for(const id of [...pending]){await syncTask(id);if(generation!==connectionGeneration)return;}
+                await syncLocalHistory();
             }catch(error){if(generation===connectionGeneration){cloudStatus.value='error';cloudError.value=error instanceof Error?error.message:'公司数据库读取失败';}}
         })();
         await connecting;
@@ -89,9 +91,21 @@ export const useResearchStore = defineStore('research-tasks', () => {
             await syncTask(task.localTaskId);
             if(cloudStatus.value==='error')break;
         }
+        await syncLocalHistory();
+    }
+    async function syncLocalHistory(){
+        const owner=cloudOwner.value,generation=connectionGeneration;
+        await flushCloud();if(generation!==connectionGeneration)return;
+        const failures=await syncOwnedLocalRecords(owner,localStorage);
+        if(generation!==connectionGeneration)return;
+        const rows=await researchCloud.list<LocalResearchTask>('task',pending);
+        if(generation!==connectionGeneration)return;
+        for(const row of rows){if(!registry.value.tasks[row.id]){const task=cleanTask(row.data);if(task?.localTaskId===row.id)registry.value=saveLocalTask(storage,registry.value,task);}}
+        historySyncIssues.value=failures;
+        feedback.value=failures.length?'部分历史记录待补全；当前任务的保存不受影响。':'当前账号可确认归属的本机成果与对话已核对同步。';
     }
     function retryCloud(){
-        if(pending.size)return flushCloud();
+        if(pending.size)return flushCloud().then(syncLocalHistory);
         connectedOwner='';return connectCloud(cloudOwner.value);
     }
     let autosaveTimer:ReturnType<typeof setTimeout>|undefined;
@@ -211,5 +225,5 @@ export const useResearchStore = defineStore('research-tasks', () => {
         feedback.value = wasCurrent ? '已删除当前任务；请从列表选择或新建任务。' : '已删除该任务及其本机草稿。';
         return true;
     }
-    return { retryCloud,cloudOwner,cloudStatus,cloudError,legacyTaskCount,connectCloud,flushCloud,syncTask,importLocalTasks, registry, draft, context, feedback, storageError, open, create, update, updateCompetition, updateStage, updateQuestionnaire, save, recordSandboxReference, recordInputFile, remove, applySeed };
+    return { retryCloud,historySyncIssues,cloudOwner,cloudStatus,cloudError,legacyTaskCount,connectCloud,flushCloud,syncLocalHistory,syncTask,importLocalTasks, registry, draft, context, feedback, storageError, open, create, update, updateCompetition, updateStage, updateQuestionnaire, save, recordSandboxReference, recordInputFile, remove, applySeed };
 });

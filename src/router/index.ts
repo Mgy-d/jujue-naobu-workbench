@@ -61,6 +61,10 @@ const router = createRouter({
 
     { path: '/research/intake', name: 'research-intake', redirect: '/research/work?mode=analysis' },
 
+    {path:'/member',name:'member-center',component:()=>import('@/views/MemberCenterView.vue'),meta:{requiresAuth:true}},
+    {path:'/member/team',name:'member-team',component:()=>import('@/views/MemberTeamView.vue'),meta:{requiresAuth:true}},
+    {path:'/member/admin',name:'member-admin',component:()=>import('@/views/MemberAdminView.vue'),meta:{requiresAuth:true,requiresMemberAdmin:true}},
+
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue') },
 
     // ── 沙箱模块（路径原样保留；requiresAuth 是接入站点登录体系时新加的） ──
@@ -109,6 +113,7 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if(AUTH_MODE==='real')await useResearchStore().connectCloud(researchCloudOwner())
+  if(to.meta.requiresMemberAdmin && !userStore.user?.permissions?.includes('admin:access'))return {name:'home'}
   if (to.meta.requiresAdmin && !isAdminUser(userStore.user)) {
     return { name: 'home' }
   }

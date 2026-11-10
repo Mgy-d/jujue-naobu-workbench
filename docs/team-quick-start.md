@@ -4,7 +4,7 @@
 
 ## 1. 拉取前端
 
-准备 Node.js 20 或更新版本、兼容 lockfile v9 的 pnpm 和 Git。以下 PowerShell 示例将项目放在 D:/Codex 下，也可使用自己的开发目录。
+准备 Node.js 24 LTS（本轮验证 24.12.0）、兼容 lockfile v9 的 pnpm 和 Git。PDF 预览依赖要求 Node.js >=22.13.0 或 >=24，Node.js 20 不再满足要求。以下 PowerShell 示例将项目放在 D:/Codex 下，也可使用自己的开发目录。
 
 ```powershell
 New-Item -ItemType Directory -Path D:/Codex/projects -Force
@@ -82,3 +82,5 @@ python scripts/check_repository.py
 
 本轮新增存储验证：前端343项通过；后端13项通过，包含实际公司 PostgreSQL 的迁移和存取测试。合成业务记录均已回滚。第二后端常驻服务与公司真实账号认证仍需联网启动后验收。
 新增远程认证离线测试6项通过；后端本轮19项登记、17项通过、2项数据库测试离线跳过。明日操作见第二后端 docs/remote-auth-acceptance.md。
+
+PDF/PPTX 原文件预览的接入、资源部署与能力边界见 [预览说明](research-binary-preview.md)。

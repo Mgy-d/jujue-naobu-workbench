@@ -4,6 +4,8 @@ export interface StoredResearchIdentity extends ResearchScope {
   version: 1; projectId: string; threadId: string; runId: string
   status: 'new' | 'running' | 'interrupt' | 'finished' | 'uncertain' | 'submitting' | 'blocked'
   pendingIds: string[]; submittedIds: string[]
+  /** Server explicitly rejected a run because pending interrupts still exist. */
+  unresolvedInterrupts?: boolean
 }
 type LocalStorageAccess = Pick<Storage, 'getItem' | 'setItem'>
 const validId = (x: unknown): x is string => typeof x === 'string' && x.length > 0 && x.length <= 256
@@ -20,8 +22,9 @@ function validate(value: unknown, scope: ResearchScope): StoredResearchIdentity 
   if (!value || typeof value !== 'object') throw new Error('运行身份数据损坏，原记录已保留。')
   const v = value as Record<string, unknown>
   if (v.version !== 1 || v.ownerId !== scope.ownerId || v.agentId !== scope.agentId || v.taskId !== scope.taskId || !validId(v.projectId) || !validId(v.threadId) || typeof v.runId !== 'string' || v.runId.length > 256 || !['new','running','interrupt','finished','uncertain','submitting','blocked'].includes(String(v.status)) || !ids(v.pendingIds) || !ids(v.submittedIds)) throw new Error('运行身份不匹配或记录损坏，已保留原记录。')
+  if (v.unresolvedInterrupts !== undefined && typeof v.unresolvedInterrupts !== 'boolean') throw new Error('待办恢复记录损坏，原记录已保留。')
   if (v.status !== 'new' && !v.runId) throw new Error('缺少原运行身份，不能安全恢复。')
-  return {version:1,ownerId:scope.ownerId,agentId:scope.agentId,taskId:scope.taskId,projectId:v.projectId,threadId:v.threadId,runId:v.runId as string,status:v.status as StoredResearchIdentity['status'],pendingIds:v.pendingIds,submittedIds:v.submittedIds}
+  return {version:1,ownerId:scope.ownerId,agentId:scope.agentId,taskId:scope.taskId,projectId:v.projectId,threadId:v.threadId,runId:v.runId as string,status:v.status as StoredResearchIdentity['status'],pendingIds:v.pendingIds,submittedIds:v.submittedIds,...(typeof v.unresolvedInterrupts==='boolean'?{unresolvedInterrupts:v.unresolvedInterrupts}:{})}
 }
 export function loadResearchIdentity(storage: LocalStorageAccess, scope: ResearchScope): {identity:StoredResearchIdentity|null;baseline:string|null} {
   const raw = storage.getItem(researchIdentityKey(scope))

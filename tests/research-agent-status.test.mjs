@@ -91,3 +91,41 @@ test('observed approved G3 ledger exposes the G4 decision without automatically 
     await scenario({running:false},{...progress,progressLine:replacement,lastText:replacement},async(run)=>assert.deepEqual(await run(),{running:false,phase:'G3',continuationUnknown:true}))
   }
 })
+
+
+test('idle watchdog handoff overrides stale CONTINUE without implying completion',async()=>{
+ const state={sessionId:'thread',running:false,backgroundBusy:false,externalState:{state:'NEEDS_ATTENTION'}}
+ await scenario(state,{nextAction:'CONTINUE',stallNow:true},async(run,calls)=>{assert.deepEqual(await run(),{running:false,pendingWork:false,manualAttention:true});assert.equal(calls.length,1)})
+ for(const change of [{backgroundBusy:undefined},{backgroundBusy:'false'},{externalState:{state:'RUNNING'}}]){
+  await scenario({...state,...change},{nextAction:'CONTINUE'},async(run)=>assert.deepEqual(await run(),{running:false,continuationPlanned:true}))
+ }
+ await scenario({...state,running:true},{},async(run)=>assert.deepEqual(await run(),{running:true}))
+ for(const change of [{backgroundBusy:true},{pendingWork:true}])await scenario({...state,...change},{},async(run)=>assert.deepEqual(await run(),{running:false,pendingWork:true}))
+ await scenario({...state,sessionId:'other'},{},async(run)=>assert.rejects(run,/身份/))
+})
+
+
+test('full history passes the former 25000 token limit while retaining only form lifecycle evidence',async()=>{
+ const m=await subject(),old={window:globalThis.window,localStorage:globalThis.localStorage,fetch:globalThis.fetch};let pageReads=0
+ try{
+  globalThis.window={location:{origin:'http://localhost'},setTimeout,clearTimeout};globalThis.localStorage={getItem:()=>null}
+  globalThis.fetch=async url=>{const u=new URL(url)
+   if(u.searchParams.has('latest'))return new Response(JSON.stringify({sessionId:'thread',latest:true,lastRunStartSequence:26001,nextAfterSequence:26002}))
+   pageReads++;const after=Number(u.searchParams.get('afterSequence'))
+   const events=after<26000?Array.from({length:500},(_,i)=>({eventSequence:after+i+1,runId:'old',payload:{type:'REASONING_MESSAGE_CONTENT',delta:'ignored'}})):[{eventSequence:26001,runId:'original',payload:{type:'RUN_STARTED'}},{eventSequence:26002,runId:'original',payload:{type:'RUN_FINISHED',outcome:{type:'interrupt',interrupts:[{id:'reply:call'}]}}}]
+   return new Response(JSON.stringify({sessionId:'thread',nextAfterSequence:events.at(-1).eventSequence,events}))
+  }
+  const events=await m.fetchResearchRecoveryEvents('thread',true)
+  assert.equal(pageReads,53);assert.equal(events.length,2);assert.equal(events.at(-1).payload.outcome.interrupts[0].id,'reply:call')
+ }finally{Object.assign(globalThis,old)}
+})
+
+
+test('exact COMPLETED parent and idle background permit conversation checks independently of stale progress classification',async()=>{
+ await scenario({sessionId:'thread',running:false,backgroundBusy:false,externalState:{state:'COMPLETED'}},new Error('stale progress'),async(run,calls)=>{
+  assert.deepEqual(await run(),{running:false,pendingWork:false,completedRun:true});assert.equal(calls.some(url=>url.endsWith('/progress')),false)
+ })
+ for(const change of [{backgroundBusy:true},{backgroundBusy:undefined},{externalState:{state:'WAITING_HITL'}},{pendingWork:true},{running:true}]){
+  await scenario({sessionId:'thread',running:false,backgroundBusy:false,externalState:{state:'COMPLETED'},...change},{sessionId:'thread',nextAction:'DONE'},async(run)=>assert.notEqual((await run()).completedRun,true))
+ }
+})

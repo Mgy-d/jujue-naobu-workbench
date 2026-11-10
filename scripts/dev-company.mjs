@@ -26,7 +26,7 @@ try{
     console.log('Open http://localhost:5185/ and log in with the actual company account. Local admin alias is disabled.')
     const child=spawn(process.execPath,[fileURLToPath(new URL('../node_modules/vite/bin/vite.js',import.meta.url)),'--mode','company','--host',process.env.FRONTEND_HOST==='0.0.0.0'?'0.0.0.0':'127.0.0.1','--port','5185','--strictPort'],{
       cwd:fileURLToPath(new URL('../',import.meta.url)),stdio:'inherit',
-      env:{...process.env,VITE_BACKEND_TARGET:target.origin,VITE_AUTH_MODE:'real',VITE_RESEARCH_AGENT_MODE:'real',VITE_RESEARCH_BUSINESS_MODE:'real',VITE_LOCAL_LOGIN_ALIAS_TARGET:''},
+      env:{...process.env,VITE_BACKEND_TARGET:target.origin,VITE_BACKEND_TARGET_TJDC:process.env.VITE_BACKEND_TARGET_TJDC||'http://192.168.1.245:8085',VITE_BUSINESS_AUTH_TARGET:process.env.VITE_BUSINESS_AUTH_TARGET||'http://192.168.1.245:8085',VITE_CASE_CATALOG_MODE:'smyy-readonly',VITE_READONLY_CASE_TARGET:process.env.VITE_READONLY_CASE_TARGET||'http://192.168.1.245:8081',VITE_DUAL_TOKEN:'1',VITE_AUTH_MODE:'real',VITE_RESEARCH_AGENT_MODE:'real',VITE_RESEARCH_BUSINESS_MODE:'real',VITE_LOCAL_LOGIN_ALIAS_TARGET:''},
     })
     child.on('error',error=>{console.error(error.message);process.exitCode=1})
     child.on('exit',code=>{process.exitCode=code??1})

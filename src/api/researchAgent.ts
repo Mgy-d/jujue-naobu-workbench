@@ -33,15 +33,26 @@ export interface ResearchSessionStatus {
   continuationPlanned?:boolean
   /** Parent is idle, but its model-written progress ledger cannot determine completion. */
   continuationUnknown?:boolean
+  /** Authoritative parent/background idle plus external COMPLETED; not research approval. */
+  completedRun?:boolean
+  manualAttention?:boolean
   awaitingInput?:boolean
   nextStage?:string
 }
 
 /** Keep old-platform idle parents distinct from completed research, without changing math-model behavior. */
 export async function fetchResearchRunStatus(agentId:string,threadId:string):Promise<ResearchSessionStatus> {
-  const state=await fetchSessionRunStatus(agentId,threadId) as {sessionId?:string;running?:unknown;pendingWork?:unknown}
+  const state=await fetchSessionRunStatus(agentId,threadId) as {sessionId?:string;running?:unknown;pendingWork?:unknown;backgroundBusy?:unknown;externalState?:{state?:unknown}}
   if(!state || typeof state.running!=='boolean')throw new Error('服务端运行状态不完整，请恢复会话核对。')
   if(state.sessionId!==undefined && state.sessionId!==threadId)throw new Error('运行状态的会话身份不匹配。')
+  if(state.backgroundBusy===true)return {running:state.running,pendingWork:true}
+  // Explicit watchdog handoff overrides a stale CONTINUE ledger, never active work.
+  if(state.sessionId===threadId && !state.running && state.backgroundBusy===false
+      && state.pendingWork!==true && state.externalState?.state==='NEEDS_ATTENTION'){
+    return {running:false,pendingWork:false,manualAttention:true}
+  }
+  if(state.sessionId===threadId && !state.running && state.backgroundBusy===false && state.pendingWork!==true
+      && state.externalState?.state==='COMPLETED')return {running:false,pendingWork:false,completedRun:true}
   if(typeof state.pendingWork==='boolean')return {running:state.running,pendingWork:state.pendingWork}
   if(state.running)return {running:true}
   const progress=await fetchSessionProgress(agentId,threadId) as {sessionId?:string;nextAction?:string;phase?:string;progressLine?:string;lastText?:string;stallNow?:boolean;hitlStuck?:boolean}
@@ -69,23 +80,27 @@ export async function fetchResearchRunStatus(agentId:string,threadId:string):Pro
 
 
 /** Read a bounded snapshot of the most recent server run, including its start. */
-export async function fetchResearchRecoveryEvents(threadId:string):Promise<Array<{runId?:string;payload:AguiEvent}>> {
+export async function fetchResearchRecoveryEvents(threadId:string,includeHistory=false):Promise<Array<{runId?:string;payload:AguiEvent}>> {
   let cursor=0, ceiling=Infinity
   try{
     const mark=await fetchAguiEventWatermark(threadId)
     if(mark.latest===true){
       if(mark.sessionId!==threadId || !Number.isInteger(mark.nextAfterSequence) || !Number.isInteger(mark.lastRunStartSequence) || (mark.lastRunStartSequence||0)<0 || mark.nextAfterSequence<(mark.lastRunStartSequence||0))throw Error('会话事件水位身份或范围无效。')
-      cursor=Math.max(0,(mark.lastRunStartSequence||0)-1);ceiling=mark.nextAfterSequence
+      cursor=includeHistory?0:Math.max(0,(mark.lastRunStartSequence||0)-1);ceiling=mark.nextAfterSequence
     }
   }catch(error){if(error instanceof Error && error.message==='会话事件水位身份或范围无效。')throw error}
   const events:Array<{runId?:string;payload:AguiEvent}>=[]
-  for(let pageNumber=0;pageNumber<50;pageNumber++){
+  // A mature research session easily exceeds 25k reasoning/text token events.
+  // Retain only lifecycle evidence during full-history recovery, not token deltas.
+  const evidenceTypes=new Set(['RUN_STARTED','RUN_FINISHED','RUN_ERROR','RAW','TOOL_CALL_START','TOOL_CALL_ARGS','TOOL_CALL_END','TOOL_CALL_RESULT'])
+  const maxPages=includeHistory?1000:50
+  for(let pageNumber=0;pageNumber<maxPages;pageNumber++){
     const page=await fetchAguiEvents(threadId,cursor,500)
     if(page.sessionId!==threadId || !Array.isArray(page.events))throw Error('会话事件记录身份不匹配。')
-    events.push(...page.events.filter(e=>e.eventSequence<=ceiling))
+    events.push(...page.events.filter(e=>e.eventSequence<=ceiling&&(!includeHistory||evidenceTypes.has(String(e.payload?.type||'')))))
     if(page.events.length<500 || page.nextAfterSequence>=ceiling)return events
     if(!Number.isInteger(page.nextAfterSequence) || page.nextAfterSequence<=cursor)throw Error('会话事件记录不完整。')
     cursor=page.nextAfterSequence
   }
-  throw Error('会话事件记录超过核对范围，无法安全恢复。')
+  throw Error(includeHistory?'历史事件超过50万条，尚未完成表单身份核对；未提交或重试。':'最近运行事件超过核对范围，无法安全恢复。')
 }

@@ -20,19 +20,11 @@
       </RouterLink>
       <span v-if="!task" class="wtb">{{ src.tag }}</span>
       <div class="wt" :title="src.title">{{ src.title }}</div>
-      <div class="steps" :style="{'--step-count':stepLabels.length}" role="tablist" aria-label="复现步骤">
-        <template v-for="(label,index) in stepLabels" :key="label">
-          <span v-if="index" class="step-line" aria-hidden="true"></span>
-          <span class="step" :class="{done:!task && index<cur,now:activeStepIndexes.includes(index),clickable:!task && index<=maxStep}" role="tab" :aria-selected="activeStepIndexes.includes(index)" :title="task ? '后台阶段仅用于定位，阶段审核结果另行核对。G1涵盖赛事理解、选题分析和研究方向。' : label" @click="jumpStep(index)">
-            <span class="n">{{ !task && index<cur?'✓':index+1 }}</span>{{ label }}
-          </span>
-        </template>
-      </div>
       <span v-if="!task" class="env-badge" :class="{inactive:!envReady}"><span>{{envLabel}}</span></span>
       <span class="stag" :class="{done:finished}"><i aria-hidden="true"></i>{{ stagText }}</span>
       <div class="flow-tools">
         <button v-if="task" type="button" class="flow-tool" :disabled="recordBusy || !liveScopeMatches" @click="saveLocalRecord">{{recordBusy?'保存中…':(researchStore.cloudOwner?'保存成果记录':'保存本次记录')}}</button>
-        <button v-if="task" type="button" class="flow-tool" :disabled="!liveScopeMatches" @click="openLocalRecord">{{researchStore.cloudOwner?'记录复现':'本机复现'}}</button>
+        <button v-if="task" type="button" class="flow-tool" :disabled="!liveScopeMatches" @click="openLocalRecord()">{{researchStore.cloudOwner?'记录复现':'本机复现'}}</button>
         <button type="button" class="flow-tool" title="暂停当前流程，先问一个问题" @click="askPause">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9.8 9a2.4 2.4 0 1 1 3.7 2c-1 .6-1.5 1.1-1.5 2.2" /><path d="M12 17h.01" /></svg>
           我有问题
@@ -56,8 +48,10 @@
           <div class="stream-in">
             <p v-if="recordNotice" class="tip-line" role="status">{{recordNotice}}</p>
             <p v-if="researchStore.cloudOwner && researchStore.cloudStatus==='error'" class="tip-line" role="alert">数据库尚未同步：{{researchStore.cloudError}} <button type="button" class="chip" @click="researchStore.retryCloud()">重试同步</button></p>
-            <div v-for="m in displayMessages" :key="m.key" class="msg" :class="m.who">
+            <details v-if="researchStore.historySyncIssues.length" class="tip-line history-sync-issues"><summary>有 {{researchStore.historySyncIssues.length}} 条旧记录待补全，当前任务仍可保存</summary><ul><li v-for="issue in researchStore.historySyncIssues" :key="issue">{{issue}}</li></ul><button type="button" class="chip" @click="researchStore.syncLocalHistory()">重新核对旧记录</button></details>
+            <div v-for="(m,messageIndex) in displayMessages" :key="m.key" class="msg conversation-message" :class="[m.who,{'message-arrive':messageMotionKeys.has(String(m.key))}]">
               <div class="bubble">
+                <div v-if="m.who==='ai' && (messageIndex===0 || displayMessages[messageIndex-1]?.who!=='ai')" class="message-author"><span class="assistant-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><path d="M10 3v14M3 10h14M5 5l10 10M5 15L15 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg></span><span>市调助手</span></div>
                 <div class="txt" :class="{'message-markdown':!!task}" v-html="m.html"></div>
                 <div v-if="m.arts&&m.arts.length" class="arts">
                   <button v-for="(art,ai) in m.arts" :key="ai" type="button" class="acard" :class="{open:openKey===m.key+'-'+ai}" @click="viewArt(art,m.key+'-'+ai)">
@@ -69,47 +63,17 @@
                 </div>
               </div>
             </div>
-              <div v-if="task && liveScopeMatches && (liveError||liveFormError||liveSession.error||liveSession.notice||latestGateTimedOut)" class="msg ai">
-              <div class="bubble"><div class="txt">
-                <p v-if="liveFiles.some(file=>isQuestionnairePath(file.path))"><button type="button" class="chip" @click="openAgentQuestionnaire">查看当前会话问卷 →</button></p>
-                <p v-if="liveError||liveFormError||liveSession.error" class="tip-line">{{liveError||liveFormError||liveSession.error}}</p>
-                <p v-if="liveSession.notice">{{liveSession.notice}}</p>
-                <div v-if="liveSession.reportedProgress" class="reported-progress">
-                  <strong>会话最近报告的进度 · {{liveSession.reportedProgress.phase}}</strong>
-                  <p>进行中 {{liveSession.reportedProgress.currentWork}}</p>
-                  <p>下一步 {{liveSession.reportedProgress.nextStep}}</p>
-                  <p>记录状态 {{liveSession.reportedProgress.state}}</p>
-                  <small v-if="liveSession.lastStatusCheckAt">最近核对 {{new Date(liveSession.lastStatusCheckAt).toLocaleTimeString('zh-CN')}}</small>
-                </div>
-                <p v-if="liveSession.status==='working'">{{backgroundChecks>=120?'自动核对已达到本页次数上限。请手动核对会话；仍无变化时需检查后台任务日志。':'后台进展每 5 秒自动核对，出现审核表单后会显示在这里。核对不会提交审核或发送继续指令。'}}</p>
-                <p v-if="latestGateTimedOut" class="tip-line">服务端报告本次审核已超时关闭，请先核对会话中的审核状态。</p>
-                <button v-if="latestGateTimedOut && !liveSession.halted" type="button" class="conversation-action primary" :disabled="liveSession.busy" @click="sendLive('请核对当前研究中已超时关闭的 G1 审核，在原会话重新提供审核入口并保留已有产物。本消息只请求恢复审核，研究阶段等待人工决策。',false,true)">请求恢复审核</button>
-                <button v-if="liveSession.halted" type="button" class="flow-tool" :disabled="liveSession.busy" @click="liveSession.recheckBlocked()">核对已保存的审核结果</button>
-                <button v-else-if="liveSession.identity" type="button" class="flow-tool" :disabled="liveSession.busy" @click="liveSession.recover()">恢复／核对会话</button>
-              </div></div>
+            <div v-if="task && liveScopeMatches && showActiveResearchReceipt(liveSession)" class="session-receipt-wrap">
+              <ResearchSessionReceipt :has-diagnostic="!!liveSession.recoveryDiagnostic" @diagnostic="exportRecoveryDiagnostic" :response-timed-out="latestResponseTimeout" :status="liveSession.status" :phase="liveSession.serverPhase" :notice="liveSession.notice" :error="liveError||liveFormError||liveSession.error" :progress="liveSession.reportedProgress" :checked-at="liveSession.lastStatusCheckAt" :busy="liveSession.busy" :halted="liveSession.halted" :timed-out="latestGateTimedOut" :has-forms="liveForms.length>0" :has-questionnaire="liveFiles.some(file=>isQuestionnairePath(file.path))" :can-recover="!!liveSession.identity" :background-notice="liveSession.status==='working' ? (backgroundChecks>=120 ? '自动核对已达到本页次数上限。请手动核对会话；仍无变化时需检查后台任务日志。' : '后台进展每 5 秒自动核对，出现审核表单后会显示在这里。核对不会提交审核或发送继续指令。') : ''" @questionnaire="openAgentQuestionnaire" @compose="focusConversationComposer" @recover="liveSession.recover()" @recheck="liveSession.recheckBlocked()" @restore-review="sendLive('请核对当前研究中已超时关闭的 G1 审核，在原会话重新提供审核入口并保留已有产物。本消息只请求恢复审核，研究阶段等待人工决策。',false,true)" />
             </div>
             <div v-if="task && liveScopeMatches && liveForms.length" class="msg ai">
               <div class="bubble form-panel"><div class="txt">
-                <h4>待填写或确认的服务端表单</h4>
-                <p>请逐项核对服务端表单；提交由原研究会话接口处理，不会自动代答或批准。</p>
+                <h4>需要你确认</h4>
+                <p>请填写或选择，核对后提交。</p>
                 <p v-if="liveFormError" class="tip-line" role="alert">{{liveFormError}}</p>
-                <section v-for="form in liveForms" :key="form.interruptId" class="live-form">
-                  <h4>{{form.title||form.toolName}}</h4><p v-if="form.message">{{form.message}}</p>
-                  <div v-for="field in form.fields" :key="field.key" class="live-field">
-                    <label :for="liveInputId(form.interruptId,field.key)">{{field.label}}<strong v-if="field.required"> · 必填</strong></label>
-                    <textarea v-if="field.kind==='textarea'" :id="liveInputId(form.interruptId,field.key)" :disabled="liveSession.busy" :value="String(liveValue(form.interruptId,field.key)??'')" :placeholder="field.placeholder" :minlength="field.minLength" :maxlength="field.maxLength" @input="setLiveField(form.interruptId,field,$event)" />
-                    <select v-else-if="field.kind==='select'" :id="liveInputId(form.interruptId,field.key)" :disabled="liveSession.busy" :value="String(liveValue(form.interruptId,field.key)??'')" @change="setLiveField(form.interruptId,field,$event)"><option value="">请选择</option><option v-for="option in field.options" :key="option" :value="option">{{option}}</option></select>
-                    <div v-else-if="field.kind==='radio-group'||field.kind==='checkbox-group'" class="live-choices">
-                      <label v-for="option in field.options" :key="option"><input :type="field.kind==='radio-group'?'radio':'checkbox'" :name="liveInputId(form.interruptId,field.key)" :disabled="liveSession.busy" :checked="field.kind==='checkbox-group'?isLiveChecked(form.interruptId,field.key,option):liveValue(form.interruptId,field.key)===option" @change="field.kind==='checkbox-group'?toggleLiveChoice(form.interruptId,field.key,option):setLiveChoice(form.interruptId,field.key,option)" />{{option}}</label>
-                    </div>
-                    <template v-else-if="field.kind==='other-text'">
-                      <input :id="liveInputId(form.interruptId,field.key)" :list="liveInputId(form.interruptId,field.key)+'-options'" :disabled="liveSession.busy" :value="String(liveValue(form.interruptId,field.key)??'')" :placeholder="field.placeholder||'选择或填写其他内容'" @input="setLiveField(form.interruptId,field,$event)" />
-                      <datalist :id="liveInputId(form.interruptId,field.key)+'-options'"><option v-for="option in field.options" :key="option" :value="option" /></datalist>
-                    </template>
-                    <input v-else :id="liveInputId(form.interruptId,field.key)" :type="field.kind==='number'?'number':'text'" :disabled="liveSession.busy" :value="String(liveValue(form.interruptId,field.key)??'')" :placeholder="field.placeholder" :min="field.min" :max="field.max" :step="field.step" :minlength="field.minLength" :maxlength="field.maxLength" @input="setLiveField(form.interruptId,field,$event)" />
-                  </div>
-                </section>
-                <button type="button" class="dl" :aria-busy="formSubmitting" :disabled="liveSession.busy||liveSession.stopping||liveSession.status!=='interrupt'||!!liveFormError" @click="submitLiveForms"><span v-if="formSubmitting" class="submit-spinner" aria-hidden="true" />{{formSubmitting?(liveSession.formSubmission?.replyAt?'正在接收回复…':liveSession.formSubmission?.runStartedAt?'服务端已响应，处理中…':'正在发送，请稍候…'):'提交全部表单并继续'}}</button>
+                <ResearchDecisionForm v-for="form in liveForms" :key="form.interruptId" :form="form" :answers="liveAnswers[form.interruptId]" :busy="liveSession.busy" @field="(field,event)=>setLiveField(form.interruptId,field,event)" @choice="(field,option)=>field.kind==='checkbox-group'?toggleLiveChoice(form.interruptId,field.key,option):setLiveChoice(form.interruptId,field.key,option)" />
+                <p v-if="formSubmitting" class="form-submit-state" role="status" aria-live="polite">{{liveSession.formSubmission?.runStartedAt?'已收到服务端响应，正在等待处理结果。':'正在提交，请勿重复点击；收到服务端响应后会更新状态。'}}</p>
+                <button type="button" class="dl" :aria-busy="formSubmitting" :disabled="liveSession.busy||liveSession.stopping||liveSession.status!=='interrupt'||!!liveFormError" @click="submitLiveForms"><span v-if="formSubmitting" class="submit-spinner" aria-hidden="true" />{{formSubmitting?(liveSession.formSubmission?.replyAt?'正在接收回复…':liveSession.formSubmission?.runStartedAt?'服务端已响应，处理中…':'正在发送，请稍候…'):(liveForms.length>1?'提交这 '+liveForms.length+' 份表单':'提交我的选择')}}</button>
               </div></div>
             </div>
             <div v-if="task && liveScopeMatches && submissionFeedback" class="msg ai">
@@ -132,11 +96,13 @@
                 </div>
               </div>
             </div>
-            <section v-if="chips.length" class="next-action-card" aria-label="需要你操作">
-              <div class="next-action-heading"><span aria-hidden="true">→</span><strong>需要你操作</strong></div>
-              <p>{{liveSession.nextStage ? '当前等待确认是否进入 '+liveSession.nextStage+'。请核对已有回复中的风险和待确认事项后选择。' : task && liveSession.serverPhase==='G3' ? g3Action?.description || '请先核对当前等待的具体事项。' : '请选择下一步，点击后会发送到当前对话。'}}</p>
+            <ResearchReplyActions v-if="latestReplyChecklist" :items="latestReplyChecklist.items" :busy="liveSession.busy" @explain="prepareChecklistExplanation" />
+            <div v-if="task && liveScopeMatches && !liveSession.busy && !liveForms.length && !liveSession.error && !liveError && !liveFormError && !latestResponseTimeout && !latestGateTimedOut && ['finished','awaiting'].includes(liveSession.status)" class="conversation-check"><button type="button" @click="liveSession.recover()">核对会话状态</button></div>
+            <section v-if="chips.length" class="next-action-card" aria-label="接下来">
+              <div class="next-action-heading"><strong>接下来</strong><span>点击后发送到当前对话</span></div>
+              <p>{{liveSession.nextStage ? '当前等待确认是否进入 '+liveSession.nextStage+'。请核对已有回复中的风险和待确认事项后选择。' : task && liveSession.serverPhase==='G3' ? g3Action?.description || '请先核对当前等待的具体事项。' : '也可以直接在下方输入你的想法。'}}</p>
               <div class="conversation-actions">
-                <button v-for="chip in chips" :key="chip" type="button" class="conversation-action primary" :disabled="task ? liveSession.busy || materialBusy : thinkingOn" @click="quickSay(chip)">{{chip}}</button>
+                <button v-for="action in nextActionItems" :key="action.label" type="button" class="conversation-action" :class="{primary:action.primary}" :disabled="task ? liveSession.busy || materialBusy : thinkingOn" @click="quickSay(action.label)"><span>{{action.label}}</span><span class="action-arrow" aria-hidden="true">{{action.primary?'→':'↗'}}</span></button>
               </div>
             </section>
             <div v-if="task ? liveScopeMatches && liveSession.busy && !submissionFeedback : thinkingOn" class="msg ai"><div class="bubble"><span class="thinking"><i></i><i></i><i></i>{{ task ? (liveSession.status==='checking' ? '正在检查模型连接' : liveSession.status==='running' ? '等待智能体响应' : '正在读取或核对会话') : 'AI 正在思考' }}</span></div></div>
@@ -161,6 +127,12 @@
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
                 </button>
               </div>
+              <div v-if="compactSessionError" class="composer-session-error" role="alert">
+                <span>{{compactSessionError}}</span>
+                <button type="button" :disabled="!liveSession.identity||liveSession.busy" @click="liveSession.halted?liveSession.recheckBlocked():liveSession.recover()">核对会话</button>
+                <button v-if="liveSession.recoveryDiagnostic" type="button" @click="exportRecoveryDiagnostic">导出核对信息</button>
+                <button v-if="latestGateTimedOut&&!liveSession.halted" type="button" @click="sendLive('请核对当前研究中已超时关闭的 '+(liveSession.serverPhase||'当前阶段')+' 审核，在原会话重新提供审核入口并保留已有产物。本消息只请求恢复审核，研究阶段等待人工决策。',false,true)">请求恢复审核</button>
+              </div>
               <div v-if="task" class="material-status">
                 <input ref="materialInput" type="file" hidden :accept="liveSession.serverPhase==='G3' ? '.csv,.tsv,.md,.txt,.json' : undefined" @change="chooseMaterial" />
                 <p v-if="materialError" role="alert">{{materialError}} <button type="button" class="material-retry" :disabled="materialBusy" @click="openMaterialManager">核对附件</button></p>
@@ -181,11 +153,33 @@
           </button>
         </div>
         <div class="db">
+          <details class="sidebar-progress">
+            <summary><span class="progress-square">{{sidebarPhaseCode}}</span><span>{{sidebarPhaseLabel}}</span><span class="progress-chevron" aria-hidden="true">⌄</span></summary>
+            <ol class="sidebar-steps"><li v-for="(label,index) in stepLabels" :key="label" :class="{current:activeStepIndexes.includes(index)}"><span>{{index+1}}</span>{{label}}<small v-if="activeStepIndexes.includes(index)">当前</small></li></ol>
+            <p v-if="task" class="sidebar-note">会话报告用于定位；G1 覆盖研究设计的三个环节，审核结果以原会话为准。</p>
+          </details>
+          <div class="sidebar-switch" role="tablist" aria-label="右栏展示方式">
+            <button id="sidebar-results-tab" type="button" role="tab" :aria-selected="sidebarView==='results'" aria-controls="sidebar-results" :class="{selected:sidebarView==='results'}" @click="sidebarView='results'">成果预览</button>
+            <button id="sidebar-flow-tab" type="button" role="tab" :aria-selected="sidebarView==='flow'" aria-controls="sidebar-flow" :class="{selected:sidebarView==='flow'}" @click="sidebarView='flow'">流程演示</button>
+          </div>
+          <section v-if="sidebarView==='flow'" id="sidebar-flow" class="sidebar-flow card" role="tabpanel" aria-labelledby="sidebar-flow-tab">
+            <template v-if="task">
+              <ResearchStageDemo :phase="liveScopeMatches ? liveSession.serverPhase : ''" :title="task.title" :files="liveFiles" :agent-id="liveScopeMatches ? liveSession.identity?.agentId || '' : ''" :thread-id="liveScopeMatches ? liveSession.identity?.threadId || '' : ''" @preview="openArtifactPreview" />
+            </template>
+            <template v-else-if="animBank.length">
+              <div class="flow-caption"><strong>案例流程演示</strong><small>前端示意</small></div>
+              <div class="stage sidebar-animation" v-html="animSvg(flowDemoIndex)"></div>
+              <div class="demo-picker"><button v-for="demo in animBank" :key="demo.k" type="button" :class="{selected:flowDemoIndex===demo.k}" @click="flowDemoIndex=demo.k">{{demo.k+1}} · {{stepLabels[demo.k]}}</button></div>
+              <p class="sidebar-note">按案例材料绘制的演示，未重新计算答卷。</p>
+            </template>
+            <p v-else class="sidebar-note">案例推进后，对应的流程演示会出现在这里。</p>
+          </section>
+          <div v-else id="sidebar-results" role="tabpanel" aria-labelledby="sidebar-results-tab">
           <template v-if="task">
             <section class="card session-files" aria-label="当前研究文件">
               <div class="file-toolbar">
                 <div class="file-tabs" role="tablist" aria-label="文件分类">
-                  <button id="artifact-tab" type="button" role="tab" :aria-selected="fileTab==='artifacts'" aria-controls="artifact-panel" :class="{active:fileTab==='artifacts'}" @click="fileTab='artifacts'">智能体产物 <span>{{artifactReadState==='loading'?'…':artifactReadState==='error'?'!':liveFiles.length || (artifactReadState==='loaded' ? 0 : '—')}}</span></button>
+                  <button id="artifact-tab" type="button" role="tab" :aria-selected="fileTab==='artifacts'" aria-controls="artifact-panel" :class="{active:fileTab==='artifacts'}" @click="fileTab='artifacts'">智能体产物 <span>{{artifactReadState==='loading'?'…':artifactReadState==='error'?'!':keyFiles.length || (artifactReadState==='loaded' ? 0 : '—')}}</span></button>
                   <button id="materials-tab" type="button" role="tab" :aria-selected="fileTab==='materials'" aria-controls="materials-panel" :class="{active:fileTab==='materials'}" @click="fileTab='materials'">已上传材料 <span>{{materialBusy?'…':materialError?'!':materials.length || (materialsLoaded ? 0 : '—')}}</span></button>
                 </div>
                 <button type="button" class="file-refresh" :disabled="!liveScopeMatches || !liveSession.identity || (fileTab==='artifacts' ? liveSession.busy : materialBusy)" @click="fileTab==='artifacts' ? refreshFileArtifacts() : reloadMaterials()">刷新</button>
@@ -195,11 +189,14 @@
                 <div v-else-if="fileTab==='artifacts'" id="artifact-panel" role="tabpanel" aria-labelledby="artifact-tab" :aria-busy="artifactReadState==='loading'">
                   <p v-if="artifactReadState==='loading'" class="file-status" role="status">正在读取产物…</p>
                   <p v-else-if="artifactReadState==='error'" class="uploaded-material-error" role="alert">{{artifactReadError}}</p>
-                  <ul v-if="liveScopeMatches&&liveFiles.length" class="live-files artifact-grid"><li v-for="file in liveFiles" :key="file.path" class="artifact-file" :class="'artifact-'+artifactType(file.name).kind" :title="file.name+' · '+file.path">
-                <div class="artifact-file-title"><span class="artifact-type-mark" aria-hidden="true">{{artifactType(file.name).glyph}}</span><strong :title="file.name">{{file.name}}</strong></div>
-                <div class="artifact-file-meta"><span class="artifact-type-label">{{artifactType(file.name).label}}</span><small class="artifact-file-size">{{file.size??'未知'}} 字节</small></div>
-                <button type="button" class="dl ghost" :disabled="liveSession.busy" @click="openArtifactPreview(file.path)">预览</button>
+                  <ul v-if="liveScopeMatches&&visibleArtifactFiles.length" class="live-files artifact-grid"><li v-for="file in visibleArtifactFiles" :key="file.path" class="artifact-file" :class="'artifact-'+artifactType(file.name).kind" :title="file.name+' · '+file.path">
+                <div class="artifact-file-title"><span class="artifact-type-mark" aria-hidden="true">{{artifactType(file.name).glyph}}</span><div class="artifact-name"><strong :title="file.name">{{artifactPresentation(file).title}}<span v-if="['Word','PDF','PPT','Excel'].includes(artifactPresentation(file).format)" class="artifact-format"> · {{artifactPresentation(file).format}}</span></strong><p v-if="artifactPresentation(file).subject" class="artifact-subject">{{artifactPresentation(file).subject}}</p></div></div>
+                <p v-if="artifactSourceLabel(file,visibleArtifactFiles)" class="artifact-source">{{artifactSourceLabel(file,visibleArtifactFiles)}}</p>
+                <div v-if="showAllArtifacts" class="artifact-file-meta"><small class="artifact-file-size">{{file.size??'未知'}} 字节</small></div>
+                <ResearchArtifactActions :agent-id="liveSession.identity?.agentId||''" :thread-id="liveSession.identity?.threadId||''" :scope="liveOwner+'|'+task.localTaskId" :path="file.path" :file-name="file.name" :disabled="liveSession.busy" @preview="openArtifactPreview(file.path)" />
               </li></ul>
+                  <div v-if="liveFiles.length" class="artifact-display-options"><span>{{showAllArtifacts?'全部文件 '+liveFiles.length+' 份':'重点成果 '+keyFiles.length+' 份'}}</span><button type="button" :aria-pressed="showAllArtifacts" @click="showAllArtifacts=!showAllArtifacts">{{showAllArtifacts?'收起过程文件':'查看全部文件（'+liveFiles.length+'）'}}</button></div>
+                  <p v-if="liveFiles.length && !keyFiles.length && !showAllArtifacts" class="file-status">尚未识别到问卷、方案、分析结果或报告，可查看全部文件。</p>
                   <p v-if="!liveFiles.length && artifactReadState==='idle'" class="file-status">点击右上角刷新，读取本会话产物。</p>
                   <p v-else-if="!liveFiles.length && artifactReadState==='loaded'" class="file-status">本次读取未找到可预览文件。</p>
                 </div>
@@ -216,18 +213,25 @@
               </div>
             </section>
           </template>
-          <div v-else class="anim-empty">产物会随流程逐步生成：走到「全局分析」后，第一份分析产物与演示一会出现在这里；之后每走一步多一份。未走到的步骤不会提前出现。</div>
+          <div v-else class="anim-empty"><p>随案例推进，可查看对应分析与演示。</p><button v-for="demo in animBank" :key="demo.k" type="button" class="dl ghost" @click="sidebarView='flow';flowDemoIndex=demo.k">{{demo.title}} →</button></div>
+          </div>
         </div>
       </aside>
     </div>
     <dialog ref="recordDialog" class="preview-dialog" aria-labelledby="record-title">
-      <header class="preview-dialog-head"><h3 id="record-title">本机记录复现 · {{savedRecord?.title}}</h3><button type="button" class="icon-btn" aria-label="关闭复现" @click="recordDialog?.close()">×</button></header>
+      <header class="preview-dialog-head"><h3 id="record-title">成果记录复现 · {{savedRecord?.title}}</h3><button type="button" class="icon-btn" aria-label="关闭复现" @click="recordDialog?.close()">×</button></header>
       <div v-if="savedRecord" class="preview-dialog-body">
-        <p>保存于 {{new Date(savedRecord.savedAt).toLocaleString('zh-CN')}} · 阶段 {{savedRecord.phase || '未确认'}} · 本机历史记录</p>
-        <p v-if="savedRecord.gaps.length" class="tip-line">保存缺口：{{savedRecord.gaps.join('；')}}</p>
+        <p>保存于 {{new Date(savedRecord.savedAt).toLocaleString('zh-CN')}} · 阶段 {{savedRecord.phase || '未确认'}} · {{recordSourceLabel}}</p>
+        <details v-if="savedRecord.gaps.length" class="record-scope"><summary>此记录有 {{savedRecord.gaps.length}} 项归档范围说明</summary><p>以下为保存本记录时的情况，后续补存结果以归档回执为准。</p><ul><li v-for="(gap,index) in savedRecord.gaps" :key="index">{{readableRecordGap(gap)}}</li></ul></details>
         <div v-for="message in savedRecord.messages.slice(0,recordStep)" :key="message.id" class="msg" :class="message.role==='user'?'me':'ai'"><div class="bubble"><div class="txt message-markdown" v-html="renderResearchMessage(message.text,message.role)"></div></div></div>
         <div class="conversation-actions"><button type="button" class="conversation-action" :disabled="recordStep<=1" @click="recordStep--">上一步</button><span>{{recordStep}} / {{savedRecord.messages.length}}</span><button type="button" class="conversation-action primary" :disabled="recordStep>=savedRecord.messages.length" @click="recordStep++">下一步</button><button type="button" class="conversation-action" @click="recordStep=1">从头复现</button></div>
-        <details v-for="file in savedRecord.files" :key="file.path"><summary>{{file.path}}</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{file.content}}</pre></details>
+        <section class="record-deliverables" aria-label="记录中的重点成果">
+          <p v-if="savedCompletion"><button type="button" class="chip" @click="openLocalRecord(true)">查看保留的首版</button></p>
+          <details v-if="savedCompletion?.fileRefs.length"><summary>已归档原文件（{{savedCompletion.fileRefs.length}}）</summary><p v-for="file in savedCompletion.fileRefs" :key="file.path">{{file.fileName}} <button type="button" class="chip" @click="downloadArchivedFile(file.id,file.fileName)">下载</button></p></details>
+          <h4>本次记录的重点成果 <span>{{recordDeliverables.length}}</span></h4>
+          <details v-for="file in recordDeliverables" :key="file.path" class="record-deliverable"><summary>{{recordFileName(file.path)}}</summary><ResearchArtifactPreview :path="file.path" :content="file.content" /></details>
+          <p v-if="!recordDeliverables.length" class="file-status">本记录未收录可展示的重点成果。可在成果预览中查看已归档文件。</p>
+        </section>
       </div>
     </dialog>
     <dialog ref="materialDialog" class="preview-dialog material-dialog" aria-labelledby="material-dialog-title" @click="($event.target===materialDialog) && materialDialog?.close()">
@@ -235,7 +239,7 @@
       <div class="preview-dialog-body">
         <p>删除后，智能体将无法继续读取该附件。重新上传后请发送消息说明使用哪份文件。</p>
         <p v-if="materialError" role="alert">{{materialError}}</p>
-        <ul class="live-files"><li v-for="item in materials" :key="item.ref"><strong>{{item.fileName}}</strong><small>{{item.size}} 字节 · {{item.fileId}}</small><button type="button" class="dl ghost" :disabled="materialBusy || liveSession.busy" @click="removeMaterial(item)">删除附件</button></li></ul>
+        <ul class="live-files"><li v-for="item in materials" :key="item.ref"><strong>{{item.fileName}}</strong><small>{{item.size}} 字节</small><button type="button" class="dl ghost" :disabled="materialBusy || liveSession.busy" @click="referenceMaterial(item)">再次引用</button><button type="button" class="dl ghost" :disabled="materialBusy || liveSession.busy" @click="removeMaterial(item)">删除附件</button></li></ul>
         <p v-if="materialBusy" role="status">正在读取附件…</p>
         <p v-else-if="!materials.length && !materialError">{{materialsLoaded?'当前会话没有附件。':'点击刷新读取附件。'}}</p>
       </div>
@@ -297,10 +301,13 @@
             </div>
           </template>
         <template v-else-if="previewPath && liveScopeMatches">
-          <p v-if="liveSession.busy" role="status">正在读取文件…</p>
-          <p v-else-if="liveSession.preview?.path!==previewPath" role="alert">{{liveSession.error || '文件读取失败，请关闭后重试。'}}</p>
-              <AgentQuestionnairePreview v-if="liveScopeMatches && liveSession.preview?.path===previewPath && liveSession.preview?.content && !liveSession.preview.truncated && isQuestionnairePath(liveSession.preview.path)" :content="liveSession.preview.content" :project-id="liveSession.identity?.projectId || ''" :task-id="task?.localTaskId" :thread-id="liveSession.identity?.threadId || ''" :path="liveSession.preview.path" />
-              <pre v-else-if="liveScopeMatches&&liveSession.preview?.path===previewPath">{{liveSession.preview.content??liveSession.preview.reason??'该文件无法直接预览。'}}</pre>
+          <p v-if="liveSession.busy && !/\.(?:pdf|pptx)$/i.test(previewPath)" role="status">正在读取文件…</p>
+          <p v-else-if="liveSession.preview?.path!==previewPath && !/\.(?:pdf|pptx)$/i.test(previewPath)" role="alert">{{liveSession.error || '文件读取失败，请关闭后重试。'}}</p>
+              <ResearchPdfPreview v-if="/\.pdf$/i.test(previewPath) && liveSession.identity" :key="liveSession.identity.threadId+previewPath" :agent-id="liveSession.identity.agentId" :thread-id="liveSession.identity.threadId" :path="previewPath" />
+              <ResearchPptPreview v-else-if="/\.pptx$/i.test(previewPath) && liveSession.identity" :key="liveSession.identity.threadId+previewPath" :agent-id="liveSession.identity.agentId" :thread-id="liveSession.identity.threadId" :path="previewPath" />
+              <ResearchWordPreview v-else-if="liveScopeMatches && /\.docx$/i.test(previewPath) && liveSession.identity" :key="liveSession.identity.threadId+previewPath" :agent-id="liveSession.identity.agentId" :thread-id="liveSession.identity.threadId" :path="previewPath" />
+              <AgentQuestionnairePreview v-else-if="liveScopeMatches && liveSession.preview?.path===previewPath && liveSession.preview?.content && !liveSession.preview.truncated && isQuestionnairePath(liveSession.preview.path)" :content="liveSession.preview.content" :project-id="liveSession.identity?.projectId || ''" :task-id="task?.localTaskId" :thread-id="liveSession.identity?.threadId || ''" :path="liveSession.preview.path" />
+              <ResearchArtifactPreview v-else-if="liveScopeMatches && liveSession.preview?.path===previewPath" :key="previewPath" :path="previewPath" :content="liveSession.preview.content" :truncated="liveSession.preview.truncated" :reason="liveSession.preview.reason" />
         </template>
       </div>
     </dialog>
@@ -311,15 +318,31 @@
 import {fetchArtifactContent} from '@/api/artifact'
 import {computed,nextTick,onBeforeUnmount,onMounted,reactive,ref,watch} from 'vue'
 import {researchG3Action} from '@/utils/researchProgress'
-import {researchCloud,archiveResearchFile} from '@/api/researchCloud'
+import {conversationActionItems,createConversationArrivalTracker,hideGenericResearchContinuation,showActiveResearchReceipt} from '@/utils/researchConversationUi'
+import {researchCloud,archiveResearchFile,listResearchFiles,readResearchFile} from '@/api/researchCloud'
+import {completeResearchArchive,type ArchiveCompletion} from '@/utils/researchArchiveCompletion'
+import {fetchResearchWordFile} from '@/api/researchWordFile'
 import {loadResearchIdentity,saveResearchIdentity} from '@/utils/researchRunIdentity'
 import {agentIdFromName} from '@/utils/nameUuid'
 import {useRoute,useRouter} from 'vue-router'
 import {getContestProblem} from '@/data/contestProblems'
 import {uploadAttachment,listAttachments,deleteAttachment,precheckFile} from '@/api/attachment'
 import AgentQuestionnairePreview from './research/AgentQuestionnairePreview.vue'
-import {renderResearchMessage} from '@/utils/researchMessageRender'
+import ResearchArtifactPreview from './research/ResearchArtifactPreview.vue'
+import ResearchWordPreview from './research/ResearchWordPreview.vue'
+import ResearchPdfPreview from './research/ResearchPdfPreview.vue'
+import ResearchPptPreview from './research/ResearchPptPreview.vue'
+import ResearchReplyActions from './research/ResearchReplyActions.vue'
+import ResearchArtifactActions from './research/ResearchArtifactActions.vue'
+import {artifactPresentation,isPrimaryResearchArtifact,artifactSourceLabel} from '@/utils/researchArtifactDisplay'
+import {materialCitationKey,pendingMaterialCitations,referencedMaterialRefs} from '@/utils/researchMaterialCitations'
+import ResearchDecisionForm from './research/ResearchDecisionForm.vue'
+import ResearchSessionReceipt from './research/ResearchSessionReceipt.vue'
+import ResearchStageDemo from './research/ResearchStageDemo.vue'
+import {researchReplyChecklist} from '@/utils/researchReplyChecklist'
+import {renderResearchMessage,isResearchPlatformNotice,researchVisibleText} from '@/utils/researchMessageRender'
 import {getResearchDemoCase,type ResearchDemoCase} from '@/data/researchDemoCases'
+import {latestResponseTimedOut,researchResponseTimeout} from '@/utils/researchResponseDisplay'
 import {AUTH_CHANGE_EVENT} from '@/api/http'
 import {configuredResearchAgent} from '@/config/researchAgent'
 import {currentResearchOwner,useResearchRuns} from '@/stores/researchRuns'
@@ -424,6 +447,15 @@ interface Art{kind:'analysis'|'animation'|'paper';title:string;sub:string;index:
 interface Msg{key:string|number;who:'me'|'ai';html:string;arts?:Art[]}
 
 const messages=ref<Msg[]>([])
+const messageMotionKeys=ref(new Set<string>())
+const motionInputScope=ref(''),demoMotionActive=ref(false)
+let motionOperation=0
+function inputMotionScope(){return (liveOwner.value||'')+':'+(task.value?.localTaskId||'')}
+async function withConversationMotion(action:()=>Promise<void>){
+  const operation=++motionOperation
+  motionInputScope.value=inputMotionScope()
+  try{await action()}finally{if(operation===motionOperation)motionInputScope.value=''}
+}
 const cur=ref(0)          /* 当前等待推进到的步骤下标（0=全局分析） */
 const maxStep=ref(0)      /* 已经走到过的最大步骤 */
 const envReadyLocal=ref(false)
@@ -431,12 +463,19 @@ const liveScopeMatches=computed(()=>!!task.value&&!!liveOwner.value&&liveSession
 const envReady=computed(()=>task.value?liveScopeMatches.value:envReadyLocal.value)
 const thinkingOn=ref(false)
 const drawerOpen=ref(true)
+const sidebarView=ref<'results'|'flow'>('results')
+const flowDemoIndex=ref(0)
+const showAllArtifacts=ref(false)
+const sidebarPhaseCode=computed(()=>task.value ? (liveScopeMatches.value ? liveSession.serverPhase || '待核对' : '待连接') : String(cur.value+1))
+const sidebarPhaseLabel=computed(()=>task.value ? ({G1:'研究设计',G2:'问卷与测试',G3:'数据分析',G4:'报告与答辩'}[sidebarPhaseCode.value] || '当前步骤待确认') : stepLabels.value[cur.value] || '案例演示')
+watch(()=>task.value?.localTaskId,()=>{showAllArtifacts.value=false;sidebarView.value='results'})
 const draft=ref('')
 const openKey=ref('')
 const openArt=ref<Art|null>(null)
 const animBank=ref<{k:number;title:string;sub:string}[]>([])
 const streamEl=ref<HTMLElement|null>(null)
 const composerInput=ref<HTMLTextAreaElement|null>(null)
+function focusConversationComposer(){void nextTick(()=>composerInput.value?.focus({preventScroll:true}))}
 const followLatest=ref(true)
 function resizeComposer(){
   const input=composerInput.value
@@ -473,6 +512,7 @@ const stagText=computed(()=>{
   if(task.value){
     if(!liveOwner.value)return '待登录'
     if(!liveScopeMatches.value)return '连接中'
+    if(latestResponseTimeout.value)return '超时待核对'
     if(liveSession.status==='checking')return '检查中'
     if(liveSession.status==='running')return '生成中'
     if(liveSession.status==='interrupt')return '待填写或确认'
@@ -488,12 +528,18 @@ const stagText=computed(()=>{
   return next?'等待：进入'+next:'等待：确认报告初稿'
 })
 const latestGateTimedOut=computed(()=>liveScopeMatches.value && /HITL_TIMEOUT|等待用户审核超时/.test(liveSession.messages.at(-1)?.text || ''))
+const latestResponseTimeout=computed(()=>liveScopeMatches.value&&!liveSession.busy&&(!!researchResponseTimeout(liveSession.error||'')||latestResponseTimedOut(liveSession.messages)))
+const compactSessionError=computed(()=>{
+ if(!task.value||!liveScopeMatches.value||showActiveResearchReceipt(liveSession))return ''
+ return liveError.value||liveFormError.value||liveSession.error||(latestResponseTimeout.value?'本次回复超时，结果需要核对。':latestGateTimedOut.value?'上一次审核已超时关闭，请核对当前会话。':liveSession.halted?'会话存在未核实的审核结果，请先核对。':'')
+})
 const chips=computed<string[]>(()=>{
   if(task.value){
     if(!liveScopeMatches.value)return []
-    if(liveSession.halted||latestGateTimedOut.value||liveSession.busy||liveForms.value.length||['uncertain','working','running','interrupt'].includes(liveSession.status))return []
+    if(liveSession.identity?.unresolvedInterrupts||liveSession.halted||latestGateTimedOut.value||latestResponseTimeout.value||liveSession.busy||liveForms.value.length||['uncertain','working','running','interrupt'].includes(liveSession.status))return []
     if(liveSession.status==='awaiting' && liveSession.nextStage)return ['确认进入 '+liveSession.nextStage,'先说明需要修订的内容']
     if(liveSession.status==='awaiting' && liveSession.serverPhase==='G3')return [g3Action.value?.label || '查看当前需要确认的事项']
+    if(hideGenericResearchContinuation(liveSession.status,liveSession.serverPhase||liveSession.reportedProgress?.phase||''))return []
     return ['请结合题目梳理研究问题和方法','继续下一步']
   }
   if(finished.value)return ['重新复现一遍','回看全局分析']
@@ -501,24 +547,57 @@ const chips=computed<string[]>(()=>{
   if(cur.value>=totalSteps.value-1)return ['确认报告初稿，完成复现','下载报告初稿','回看全局分析']
   return ['进入下一步','把这一步的方法再展开讲讲','跳过这一步，直接进入下一问']
 })
+const nextActionItems=computed(()=>conversationActionItems(chips.value))
 const inputPlaceholder=computed(()=>task.value?'输入问题或补充说明…':'输入问题，或选择下方快捷指令…')
 const envLabel=computed(()=>task.value?(liveScopeMatches.value?'真实会话已绑定':liveOwner.value?'正在绑定任务':'等待登录'):envReadyLocal.value?'演示环境就绪':'未创建环境')
-const drawerTitle=computed(()=>!openArt.value?'产物预览':openArt.value.kind==='animation'?'可视化演示':openArt.value.kind==='analysis'?'问题分析':'报告初稿')
-const drawerSub=computed(()=>!openArt.value?'随流程逐步生成':openArt.value.kind==='animation'?'点击左侧卡片回看 · 可手动收起':'由本步骤讲解内容整理')
+const drawerTitle=computed(()=>sidebarView.value==='flow'?'流程演示':'成果预览')
+const drawerSub=computed(()=>sidebarView.value==='flow'?'查看研究路线与当前环节':'问卷、分析与报告集中查看')
 
 /* ---------- 消息 ---------- */
 function esc(s:string){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+const latestReplyChecklist=computed(()=>{
+ if(!liveScopeMatches.value||liveSession.busy||liveForms.value.length||liveSession.error||latestResponseTimeout.value||!['finished','awaiting'].includes(liveSession.status))return null
+ for(let i=liveSession.messages.length-1;i>=0;i--){
+  const message=liveSession.messages[i]!
+  if(message.local)continue
+  if(message.role==='user')return null
+  if(message.role==='assistant'&&message.text.trim()){
+   const checklist=researchReplyChecklist(researchVisibleText(message.text))
+   return checklist?{...checklist,messageId:message.id}:null
+  }
+ }
+ return null
+})
 const displayMessages=computed<Msg[]>(()=>{
   if(!liveScopeMatches.value||!liveSession.messages.length)return messages.value
+  const platformNotices=new Set<string>()
   return liveSession.messages.flatMap(message=>{
     if(/^\s*\[平台留痕\]\s*等待用户审核超时[，,]/.test(message.text))return []
-    const html=renderResearchMessage(message.text,message.role)
+    const html=renderResearchMessage(latestReplyChecklist.value?.messageId===message.id?latestReplyChecklist.value.remainder:message.text,message.role)
     if(!html)return []
-    return [{key:message.id,who:message.role==='user'?'me' as const:'ai' as const,html}]
+    const platformNotice=isResearchPlatformNotice(message.text)
+    if(platformNotice){if(platformNotices.has(html))return [];platformNotices.add(html)}
+    return [{key:message.id,who:platformNotice?'ai' as const:message.role==='user'?'me' as const:'ai' as const,html}]
   })
 })
+const arrivalTracker=createConversationArrivalTracker()
+let lastMotionScope=''
+watch(()=>({
+  scope:task.value?'task:'+inputMotionScope()+':'+(liveSession.identity?.threadId||'new'):'demo:'+route.fullPath,
+  ids:displayMessages.value.map(message=>String(message.key)),
+}),snapshot=>{
+  if(snapshot.scope!==lastMotionScope){messageMotionKeys.value=new Set();lastMotionScope=snapshot.scope}
+  const allowNew=task.value?motionInputScope.value===inputMotionScope() && liveSession.status==='running':demoMotionActive.value
+  const arrived=arrivalTracker.observe(snapshot.scope,snapshot.ids,allowNew)
+  if(arrived.length)messageMotionKeys.value=new Set([...messageMotionKeys.value,...arrived])
+},{immediate:true,flush:'sync'})
 const previewDialog=ref<HTMLDialogElement|null>(null)
 const previewPath=ref('')
+function exportRecoveryDiagnostic(){
+ if(!liveScopeMatches.value||!liveSession.recoveryDiagnostic)return
+ const url=URL.createObjectURL(new Blob([JSON.stringify(liveSession.recoveryDiagnostic,null,2)],{type:'application/json'})),link=document.createElement('a')
+ link.href=url;link.download='研究表单恢复核对.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+}
 function closePreviewState(){previewPath.value='';openArt.value=null}
 function closeOnBackdrop(event:MouseEvent){if(event.target===previewDialog.value)previewDialog.value?.close()}
 async function openArtifactPreview(path:string){
@@ -526,6 +605,7 @@ async function openArtifactPreview(path:string){
   openArt.value=null
   previewPath.value=path
   previewDialog.value?.showModal()
+  if(/\.(?:pdf|pptx)$/i.test(path))return
   const generation=liveGeneration,identity=liveSession.identity?{...liveSession.identity}:null
   await liveSession.previewArtifact(path)
   if(generation!==liveGeneration || !identity || researchStore.cloudOwner!==currentResearchOwner() || !task.value)return
@@ -548,7 +628,7 @@ async function openArtifactPreview(path:string){
     }
   }catch(error){if(current())recordNotice.value='产物数据库归档尚未完成：'+(error instanceof Error?error.message:'连接失败')}
 }
-watch(()=>openArt.value,art=>{if(art){previewPath.value='';void nextTick(()=>{if(!previewDialog.value?.open)previewDialog.value?.showModal()})}})
+watch(()=>openArt.value,art=>{if(art){if(art.kind==='animation'){sidebarView.value='flow';flowDemoIndex.value=art.index;return}previewPath.value='';void nextTick(()=>{if(!previewDialog.value?.open)previewDialog.value?.showModal()})}})
 watch(()=>[task.value?.localTaskId,liveOwner.value,liveSession.identity?.threadId],()=>{previewDialog.value?.close();closePreviewState()})
 onBeforeUnmount(()=>previewDialog.value?.close())
 function isQuestionnairePath(path:string){return /(?:^|[/\\])问卷结构\.json$/i.test(path)}
@@ -573,6 +653,17 @@ const liveFiles=computed(()=>{
   return flatten(liveSession.artifacts)
 })
 
+// Historical record selection retains its existing behavior.
+function isKeyArtifact(file:{name:string;path:string}){
+  if(/(?:^|[/\\])(?:_proof|_state|_input|uploads|分析代码)(?:[/\\]|$)/i.test(file.path))return false
+  if(/manifest|日志|留痕|核验|校验|交接|登记|AI使用|AI整理|指纹|输入|原始清单模板/i.test(file.name))return false
+  return /研究简报|研究问题|调查方案|研究方案|问卷结构|问卷.*(?:预览|定稿|正式)|统计报告|分析报告|统计结果|研究报告|报告初稿|报告正文|答辩|数据字典|清洗后|图表|\.(?:png|jpe?g|webp|pdf|pptx?|docx?)$/i.test(file.name)
+}
+
+// Display selection does not delete, deduplicate or alter server artifacts.
+const keyFiles=computed(()=>liveFiles.value.filter(isPrimaryResearchArtifact))
+const visibleArtifactFiles=computed(()=>showAllArtifacts.value?liveFiles.value:keyFiles.value)
+
 function push(who:Msg['who'],html:string,arts?:Art[]){messages.value.push({key:++seq,who,html,arts});scrollBottom()}
 function scrollBottom(force=false){
   if(force)followLatest.value=true
@@ -582,7 +673,7 @@ function scrollBottom(force=false){
   })
 }
 watch(displayMessages,()=>scrollBottom(),{deep:true})
-function think(cb:()=>void){thinkingOn.value=true;scrollBottom();setTimeout(()=>{thinkingOn.value=false;cb()},760)}
+function think(cb:()=>void){thinkingOn.value=true;scrollBottom();setTimeout(()=>{thinkingOn.value=false;demoMotionActive.value=true;try{cb()}finally{demoMotionActive.value=false}},760)}
 function artGrad(kind:Art['kind']){return kind==='analysis'?'linear-gradient(120deg,#12A594,#17A2C4)':kind==='animation'?'linear-gradient(120deg,#17A2C4,#2EC4B0)':'linear-gradient(120deg,#0B6E68,#2EC4B0)'}
 function liveInputId(id:string,key:string){return 'replay-live-'+encodeURIComponent(id)+'-'+encodeURIComponent(key)}
 function liveValue(id:string,key:string){return liveAnswers[id]?.[key]}
@@ -669,10 +760,11 @@ async function sendLive(text:string,initial=false,recoverExpiredGate=false){
     if(liveSession.busy||liveSession.stopping)return
 
     if(liveStatusIs('working','running')){liveError.value=liveSession.error||'当前运行状态尚未核对，请先恢复会话。';return}
-    const materialRefs=materials.value.length ? '\n\n本会话已上传材料引用（需读取核对）：\n'+materials.value.map(item=>item.fileName+' '+item.ref).join('\n') : ''
+    const citationMaterials=selectedCitationMaterials()
+    const materialRefs=citationMaterials.length ? '\n\n本会话已上传材料引用（需读取核对）：\n'+citationMaterials.map(item=>item.fileName+' '+item.ref).join('\n') : ''
     const prompt=(initial?message:'研究主题：'+(currentTask.competition?.background??currentTask.title)+'\n\n我的问题或补充说明：\n'+message)+materialRefs
     const before=liveSession.messages.length
-    await liveSession.start(prompt, {requireModelProbe:false,allowIdleMessage:!initial,recoverExpiredGate})
+    await withConversationMotion(()=>liveSession.start(prompt, {requireModelProbe:false,allowIdleMessage:!initial,recoverExpiredGate}))
     if(generation!==liveGeneration||task.value?.localTaskId!==currentTask.localTaskId)return
     if(liveSession.messages.length>before&&draft.value.trim()===message)draft.value=''
     if(['finished','interrupt','awaiting'].includes(liveSession.status)&&liveSession.identity?.runId)await liveSession.refreshArtifacts()
@@ -682,9 +774,17 @@ async function sendLive(text:string,initial=false,recoverExpiredGate=false){
 }
 interface LocalRecord {version:1;title:string;savedAt:string;phase:string;messages:{id:string;role:'user'|'assistant';text:string}[];files:{path:string;content:string}[];gaps:string[]}
 const recordBusy=ref(false),recordNotice=ref(''),savedRecord=ref<LocalRecord|null>(null),recordStep=ref(1),recordDialog=ref<HTMLDialogElement|null>(null)
+const recordSourceLabel=ref('历史记录')
+function recordFileName(path:string){return (path.split(/[/\\]/).at(-1)||'研究成果').replace(/\.(md|txt|json)$/i,'')}
+function readableRecordGap(gap:string){return gap.replace(/(?:artifacts|uploads)[/\\]\S*[/\\]([^/\\\s]+)/g,'$1')}
+const recordDeliverables=computed(()=>{
+  const files=(savedRecord.value?.files || []).filter(file=>isKeyArtifact({name:file.path.split(/[/\\]/).at(-1)||'',path:file.path}))
+  const seen=new Set<string>()
+  return files.filter(file=>{const key=recordFileName(file.path)+'\u0000'+file.content;if(seen.has(key))return false;seen.add(key);return true})
+})
 function localRecordKey(){return 'shidiaoyanzhen.record.v1:'+liveOwner.value+':'+liveSession.scope?.agentId+':'+task.value?.localTaskId}
 let archivingConversation=false,archivedConversation=''
-async function archiveConversation(){
+async function archiveConversation(strict=false){
   if(archivingConversation || !liveScopeMatches.value || !liveSession.identity || !task.value
       || researchStore.cloudOwner!==currentResearchOwner() || researchStore.cloudStatus==='error' || !liveSession.messages.length)return
   const owner=currentResearchOwner(),generation=liveGeneration,identity={...liveSession.identity}
@@ -699,65 +799,70 @@ async function archiveConversation(){
     if(generation!==liveGeneration || owner!==currentResearchOwner())return
     await researchCloud.save('session',id,snapshot)
     if(generation===liveGeneration)archivedConversation=signature
-  }catch(error){if(generation===liveGeneration)recordNotice.value='对话尚未同步到数据库：'+(error instanceof Error?error.message:'保存失败')}
+  }catch(error){if(generation===liveGeneration)recordNotice.value='对话尚未同步到数据库：'+(error instanceof Error?error.message:'保存失败');if(strict)throw error}
   finally{archivingConversation=false}
 }
 async function saveLocalRecord(){
-  if(recordBusy.value || !liveScopeMatches.value || !liveSession.identity || !liveSession.scope)return
-  const generation=liveGeneration,key=localRecordKey(),identity={...liveSession.identity},agentId=liveSession.scope.agentId
-  if(!researchStore.cloudOwner && localStorage.getItem(key)){recordNotice.value='本任务的第一份记录已保存，点击“本机复现”查看。';return}
-  recordBusy.value=true;recordNotice.value='正在保存当前对话与可读取产物…'
-  try{
-    if(researchStore.cloudOwner){
-      const existing=await researchCloud.get<{taskId:string;record:LocalRecord}>('record',task.value!.localTaskId)
-      if(generation!==liveGeneration)return
-      if(existing){recordNotice.value='本任务的第一份成果记录已在公司数据库保存，可点击“记录复现”查看。';return}
-      const cached=localStorage.getItem(key)
-      if(cached){
-        const first=JSON.parse(cached) as LocalRecord
-        if(first.version===1 && Array.isArray(first.messages) && Array.isArray(first.files) && Array.isArray(first.gaps)){
-          await researchStore.flushCloud()
-          if(generation!==liveGeneration)return
-          await researchCloud.save('record',task.value!.localTaskId,{taskId:task.value!.localTaskId,record:first})
-          if(generation===liveGeneration)recordNotice.value='原本机首版记录已导入公司数据库，可点击“记录复现”查看。'
-          return
-        }
-      }
+ if(recordBusy.value||!liveScopeMatches.value||!liveSession.identity||!task.value)return
+ const generation=liveGeneration,owner=currentResearchOwner(),taskId=task.value.localTaskId,identity={...liveSession.identity},key=localRecordKey()
+ const valid=()=>generation===liveGeneration&&owner===currentResearchOwner()&&task.value?.localTaskId===taskId&&identity.threadId===liveSession.identity?.threadId
+ recordBusy.value=true;recordNotice.value='正在核对历史记录并补全成果…'
+ try{
+  if(!researchStore.cloudOwner){
+   if(localStorage.getItem(key)){recordNotice.value='本机首版已保留；连接数据库后可补全。';return}
+   const local:LocalRecord={version:1,title:task.value.title,savedAt:new Date().toISOString(),phase:liveSession.serverPhase,messages:liveSession.messages.map(m=>({id:m.id,role:m.role,text:m.text})),files:[],gaps:['仅保存在本机；尚未归档成果文件。']}
+   localStorage.setItem(key,JSON.stringify(local));recordNotice.value='本机首版已保存，尚未同步数据库。';return
+  }
+  await researchStore.syncLocalHistory();if(!valid())return
+  let original=(await researchCloud.get<{taskId:string;record:LocalRecord}>('record',taskId))?.data.record
+  if(!valid())return
+  if(!original){
+   const cached=localStorage.getItem(key)
+   original=cached?JSON.parse(cached):{version:1,title:task.value.title,savedAt:new Date().toISOString(),phase:liveSession.serverPhase,messages:liveSession.messages.map(m=>({id:m.id,role:m.role,text:m.text})),files:[],gaps:['首版保留；成果补读见补全记录。']}
+   if(original?.version!==1||!Array.isArray(original.messages)||!original.messages.length||!Array.isArray(original.files)||!Array.isArray(original.gaps))throw Error('首版记录不完整，未覆盖原记录。')
+   await researchCloud.save('record',taskId,{taskId,record:original});if(!valid())return
+  }
+  await archiveConversation(true);if(!valid())return
+  if(!liveSession.busy)await liveSession.refreshArtifacts();if(!valid())return
+  const listed=await listResearchFiles(taskId);if(!valid())return
+  const completion=await completeResearchArchive({taskId,threadId:identity.threadId,baseSavedAt:original.savedAt,paths:[...liveFiles.value,...original.gaps.flatMap(gap=>{const path=gap.split('：')[0]||'';return /^(?:artifacts|uploads|sub-[^/]+)\//.test(path)?[{path,name:path.split('/').at(-1)||path}]:[]})],priorFiles:original.files,valid,read:async path=>{
+   const stored=listed.filter(f=>f.taskId===taskId&&f.sourcePath===path).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0]
+   let bytes:ArrayBuffer,ref:import('@/utils/researchArchiveCompletion').ArchiveFileRef
+   if(stored){
+    bytes=await readResearchFile(stored.id)
+    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('')
+    if(hash!==stored.contentHash)throw Error('数据库副本校验失败，未采用。')
+    ref={path,id:stored.id,fileName:stored.fileName,contentHash:hash,size:bytes.byteLength}
+   }else{
+    const textKey=agentIdFromName('research-artifact:'+taskId+':'+identity.threadId+':'+path)
+    const archived=await researchCloud.get<{taskId:string;threadId:string;path:string;content:string}>('artifact',textKey)
+    if(!valid())throw Error('任务已变化')
+    if(archived?.data.taskId===taskId&&archived.data.threadId===identity.threadId&&archived.data.path===path&&typeof archived.data.content==='string')bytes=new TextEncoder().encode(archived.data.content).buffer
+    else{
+     const response=await fetchResearchWordFile(identity.agentId,identity.threadId,path,AbortSignal.timeout(20000))
+     if(!response.ok)throw Error('云端原件读取 HTTP '+response.status)
+     if(Number(response.headers.get('content-length'))>20*1024*1024)throw Error('文件超过20MB，未归档')
+     bytes=await response.arrayBuffer()
     }
-    const record:LocalRecord={version:1,title:task.value?.title || '研究记录',savedAt:new Date().toISOString(),phase:liveSession.serverPhase,messages:liveSession.messages.map(m=>({id:m.id,role:m.role,text:m.text})),files:[],gaps:[]}
-    if(!record.messages.length)throw Error('尚未读取到对话，请先核对会话。')
-    if(!liveSession.busy)await liveSession.refreshArtifacts()
-    if(generation!==liveGeneration || key!==localRecordKey())return
-    const files=[...liveFiles.value]
-    if(!files.length)record.gaps.push(liveSession.error || '未读取到产物文件，仅保存当前对话和阶段')
-    if(files.length>30)record.gaps.push('超过30份的文件未纳入本次记录')
-    for(const file of files.slice(0,30)){
-      try{
-        if((file.size || 0)>300000)throw Error('文件超过本机快照大小上限')
-        const content=await fetchArtifactContent(agentId,identity.threadId,file.path,AbortSignal.timeout(10000))
-        if(generation!==liveGeneration || key!==localRecordKey())return
-        if(content.content===null || content.truncated || content.binary)throw Error(content.reason || '文件无法完整保存为文本')
-        record.files.push({path:file.path,content:content.content})
-      }catch(error){record.gaps.push(file.name+'：'+(error instanceof Error?error.message:'读取失败'))}
-    }
-    const json=JSON.stringify(record)
-    if(new Blob([json]).size>3000000)throw Error('记录超过3MB，请减少材料后保存。')
-    if(generation!==liveGeneration || key!==localRecordKey())return
-    if(researchStore.cloudOwner){
-      await researchStore.flushCloud()
-      if(generation!==liveGeneration)return
-      await researchCloud.save('record',task.value!.localTaskId,{taskId:task.value!.localTaskId,record})
-      if(generation!==liveGeneration)return
-      try{localStorage.setItem(key,json)}catch{}
-      recordNotice.value='成果记录已保存到公司数据库。'+(record.gaps.length?'部分文件未保存，复现时会显示缺口。':'可点击“记录复现”查看。')
-    }else{
-      localStorage.setItem(key,json)
-      recordNotice.value='已保存第一份本机记录。'+(record.gaps.length?'部分文件未保存，复现时会显示缺口。':'可点击“本机复现”从头查看。')
-    }
-  }catch(error){if(generation===liveGeneration)recordNotice.value='保存失败：'+(error instanceof Error?error.message:'浏览器存储不可用')}
-  finally{recordBusy.value=false}
+    if(!valid())throw Error('任务已变化')
+    const saved=await archiveResearchFile(taskId,path.split('/').at(-1)||path,path,bytes)
+    ref={path,id:saved.id,fileName:path.split('/').at(-1)||path,contentHash:saved.contentHash,size:bytes.byteLength}
+   }
+   return {bytes,ref}
+  }})
+  if(!valid())return
+  if(liveSession.error)completion.gaps.push('最新文件清单核对失败：'+liveSession.error)
+  const supplementId='record-completion:'+taskId+':'+crypto.randomUUID()
+  await researchCloud.save('artifact',supplementId,{taskId,threadId:identity.threadId,completion})
+  if(!valid())return
+  await researchCloud.save('artifact','record-completion-latest:'+taskId,{taskId,threadId:identity.threadId,supplementId})
+  if(valid())recordNotice.value='首版保持不变；补全记录已保存，已归档 '+completion.fileRefs.length+' 份文件。'+(completion.gaps.length?'仍有 '+completion.gaps.length+' 项缺口，记录复现中可查看。':'本次文件清单全部归档。')
+ }catch(error){if(valid())recordNotice.value='补全未完成：'+(error instanceof Error?error.message:'保存失败')}
+ finally{if(generation===liveGeneration)recordBusy.value=false}
 }
-async function openLocalRecord(){
+const savedCompletion=ref<ArchiveCompletion|null>(null)
+async function openLocalRecord(originalOnly=false){
+  savedCompletion.value=null
   const generation=liveGeneration
   try{
     let raw:string|null=null
@@ -767,12 +872,26 @@ async function openLocalRecord(){
       if(row)raw=JSON.stringify(row.data.record)
     }else raw=localStorage.getItem(localRecordKey())
     if(!raw)throw Error('请先保存本次记录。')
-    const record=JSON.parse(raw) as LocalRecord
+    let record=JSON.parse(raw) as LocalRecord
+    if(researchStore.cloudOwner&&task.value&&!originalOnly){
+      const taskId=task.value.localTaskId,pointer=await researchCloud.get<{taskId:string;supplementId:string}>('artifact','record-completion-latest:'+taskId)
+      if(generation!==liveGeneration)return
+      if(pointer?.data.taskId===taskId){
+        const row=await researchCloud.get<{taskId:string;completion:ArchiveCompletion}>('artifact',pointer.data.supplementId)
+        if(generation!==liveGeneration)return
+        const c=row?.data.completion
+        if(row?.data.taskId===taskId&&c?.taskId===taskId&&c.threadId===liveSession.identity?.threadId&&c.baseSavedAt===record.savedAt){savedCompletion.value=c;record={...record,files:c.files,gaps:c.gaps}}
+      }
+    }
     if(record.version!==1 || !Array.isArray(record.messages) || !Array.isArray(record.files) || !Array.isArray(record.gaps))throw Error('本机记录格式不完整。')
+    recordSourceLabel.value=savedCompletion.value?'公司数据库补全记录':researchStore.cloudOwner?'公司数据库首版归档':'本机历史记录'
     savedRecord.value=record;recordStep.value=Math.min(1,record.messages.length);recordDialog.value?.showModal()
   }catch(error){recordNotice.value=error instanceof Error?error.message:'无法读取本机记录。'}
 }
-watch(()=>[task.value?.localTaskId,liveOwner.value],()=>{recordDialog.value?.close();savedRecord.value=null;recordNotice.value=''})
+watch(()=>[task.value?.localTaskId,liveOwner.value],()=>{recordDialog.value?.close();savedRecord.value=null;savedCompletion.value=null;recordBusy.value=false;recordNotice.value=''})
+async function downloadArchivedFile(id:string,name:string){
+ try{const owner=currentResearchOwner(),bytes=await readResearchFile(id);if(owner!==currentResearchOwner())return;const url=URL.createObjectURL(new Blob([bytes])),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(error){recordNotice.value=error instanceof Error?error.message:'下载失败'}
+}
 const materialInput=ref<HTMLInputElement|null>(null)
 const selectedMaterial=ref<File|null>(null)
 const fileTab=ref<'artifacts'|'materials'>('artifacts')
@@ -896,7 +1015,7 @@ const submissionFeedback=computed(()=>{
   const now=active?Math.max(feedbackClock.value,submission.startedAt):(submission.settledAt || submission.startedAt)
   const elapsed=Math.max(0,Math.floor((now-submission.startedAt)/1000))
   const quiet=active && now-submission.lastEventAt>=45000
-  const failed=!!liveSession.error || liveSession.status==='uncertain' || liveSession.halted
+  const failed=latestResponseTimeout.value || !!liveSession.error || liveSession.status==='uncertain' || liveSession.halted
   const warning=failed || quiet || submission.checkFailed
   const step=submission.replyAt? (active?2:3):submission.runStartedAt?1:0
   let title='正在核对并发送表单'
@@ -913,7 +1032,7 @@ const submissionFeedback=computed(()=>{
     detail=submission.checkMessage || '本次请求仍在等待回应，暂时无法确认新的处理进展。'
   }
   if(submission.checkFailed && !failed){title='状态核对暂时失败';detail=submission.checkMessage}
-  if(failed){title=submission.issued?'提交结果需要核对':'本次未能提交';detail=liveSession.error || '请核对当前会话状态，填写内容已保留。'}
+  if(failed){title=latestResponseTimeout.value?'本次处理超时，结果待核对':submission.issued?'提交结果需要核对':'本次未能提交';detail=latestResponseTimeout.value?'本次回复未正常完成，请核对已执行的修改与原会话；不会自动重试。':liveSession.error || '请核对当前会话状态，填写内容已保留。'}
   return {active:active && !failed,warning,step,title,detail,elapsed}
 })
 async function recheckSubmission(){
@@ -925,7 +1044,7 @@ onBeforeUnmount(()=>{clearInterval(feedbackTimer)})
 async function submitLiveForms(){
   if(liveSession.busy || liveSession.stopping)return
   const generation=liveGeneration
-  const request=liveSession.submit(liveAnswers)
+  const request=withConversationMotion(()=>liveSession.submit(liveAnswers))
   await nextTick()
   if(generation===liveGeneration)scrollBottom(true)
   await request
@@ -1100,8 +1219,18 @@ function reset(){
   push('me',lead+'<br><b>'+esc(s.tag)+'</b>：'+esc(s.title)+'。<br>'+esc(s.attach))
   think(()=>pushStep(0))
 }
+const explicitMaterialRefs=ref<string[]>([])
+function citationScopeKey(){const identity=liveSession.identity;return identity&&task.value?materialCitationKey(currentResearchOwner(),identity.agentId,task.value.localTaskId,identity.threadId):''}
+function attemptedCitations():string[]{const key=citationScopeKey();if(!key)return [];try{const value=JSON.parse(localStorage.getItem(key)||'[]');if(!Array.isArray(value)||value.some(v=>typeof v!=='string'))throw Error();return value}catch{throw Error('附件引用记录无法读取，请核对会话后再明确选择需要引用的附件。')}}
+function selectedCitationMaterials(){return pendingMaterialCitations(materials.value,liveSession.messages,attemptedCitations(),explicitMaterialRefs.value)}
+function persistMaterialCitations(){if(!liveScopeMatches.value)return;const key=citationScopeKey();if(!key)return;const refs=referencedMaterialRefs(materials.value,liveSession.messages);if(!refs.length)return;try{localStorage.setItem(key,JSON.stringify([...new Set([...attemptedCitations(),...refs])]));explicitMaterialRefs.value=explicitMaterialRefs.value.filter(ref=>!refs.includes(ref))}catch{materialError.value='材料引用状态未能在本机保存，请核对原会话，避免重复发送。'}}
+watch(()=>[liveSession.messages.filter(m=>m.role==='user').map(m=>m.id+':'+m.text).join('|'),materials.value.map(m=>m.ref).join('|'),citationScopeKey()],persistMaterialCitations,{flush:'sync'})
+watch(()=>[task.value?.localTaskId,currentResearchOwner(),liveSession.identity?.threadId],()=>{explicitMaterialRefs.value=[]})
+function referenceMaterial(item:AttachmentItem){if(!explicitMaterialRefs.value.includes(item.ref))explicitMaterialRefs.value.push(item.ref);draft.value=draft.value||'请重新读取「'+item.fileName+'」，并说明与当前研究的关系。';materialDialog.value?.close();focusConversationComposer()}
+function prepareChecklistExplanation(item:string){draft.value='关于以下事项，我补充说明：\n'+item.replace(/[*`]/g,'')+'\n';focusConversationComposer()}
 function sendMaterials(){
   if(!materials.value.length)return
+  try{if(!selectedCitationMaterials().length){materialError.value='附件已在原会话中引用。请输入问题；需要再次引用时请在附件列表选择“再次引用”。';return}}catch(e){materialError.value=e instanceof Error?e.message:'附件状态需核对';return}
   void sendLive(draft.value.trim() || '请读取本会话已上传的材料，核对文件是否可读、字段及当前阶段的材料缺口，并反馈读取结果。标有合成测试的文件按软件演练材料登记。统计执行等待我确认。')
 }
 function send(){
@@ -1500,6 +1629,8 @@ watch(()=>[route.params.id,route.query.task],()=>{if(route.name==='research-repl
 .live-choices label{border-color:#A0C2BB;transition:background .16s,border-color .16s,box-shadow .16s}
 .live-choices label:has(input:checked){border-color:#078B7B;background:#DBF2EB;color:#075F56;box-shadow:inset 0 0 0 1px #078B7B}
 .live-choices label:focus-within{outline:2px solid #078B7B;outline-offset:2px}
+.form-submit-state{padding:10px 12px;border-radius:8px;background:#e9f6f1;color:#17665b;font-size:13px;line-height:1.7}
+.form-panel>.txt{border:0;box-shadow:none;padding:18px 20px;background:#fff}
 .form-panel .dl{background:#0B8E80;border-color:#08796E;color:#fff;transition:transform .15s,box-shadow .15s,background .15s}
 .form-panel .dl:not(:disabled):hover{background:#08796E;box-shadow:0 4px 12px rgba(11,110,104,.2)}
 .form-panel .dl:not(:disabled):active{transform:scale(.985)}
@@ -1547,7 +1678,11 @@ watch(()=>[route.params.id,route.query.task],()=>{if(route.name==='research-repl
 .drawer .artifact-file:hover{transform:translateY(-1px);border-color:#83C7BE;box-shadow:0 7px 16px rgba(11,110,104,.1)}
 .drawer .artifact-file:focus-within{border-color:#57B7AC;box-shadow:0 0 0 3px rgba(18,165,148,.12)}
 .drawer .artifact-file-title{grid-column:1;display:flex;align-items:flex-start;gap:8px;min-width:0}
-.drawer .artifact-file-title strong{display:-webkit-box;min-width:0;padding-top:2px;color:var(--ink);font-size:12.7px;line-height:1.45;overflow:hidden;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+.drawer .artifact-name{min-width:0;flex:1}
+.drawer .artifact-file-title strong{display:block;min-width:0;padding-top:2px;color:var(--ink);font-size:13px;font-weight:750;line-height:1.5;overflow-wrap:anywhere}
+.drawer .artifact-format{white-space:nowrap;color:#0B8279;font-weight:750}
+.drawer .artifact-subject{margin:5px 0 0;color:var(--ink2);font-size:11.5px;line-height:1.55;overflow-wrap:anywhere}
+.drawer .artifact-source{margin:0;color:var(--ink3);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
 .drawer .artifact-type-mark{display:grid;place-items:center;width:30px;height:30px;flex:0 0 auto;border-radius:9px;background:#E7F5F2;color:#0B8279;font-size:11.5px;font-weight:800;box-shadow:inset 0 0 0 1px rgba(11,110,104,.08)}
 .drawer .artifact-spreadsheet .artifact-type-mark{background:#EAF6EE;color:#32845D}
 .drawer .artifact-data .artifact-type-mark{background:#EAF5FA;color:#267FA1}
@@ -1582,16 +1717,38 @@ watch(()=>[route.params.id,route.query.task],()=>{if(route.name==='research-repl
 @media(prefers-reduced-motion:reduce){.drawer .dl,.drawer .icon-btn,.drawer .artifact-file{transition:none}.drawer .dl:not(:disabled):hover,.drawer .dl:not(:disabled):active,.drawer .icon-btn:hover,.drawer .icon-btn:active,.drawer .artifact-file:hover{transform:none}}
 .anim-empty{padding:26px 20px;border:1px dashed var(--blue-200);border-radius:12px;background:#fff;font-size:12.8px;color:var(--ink3);line-height:1.8}
 
-.message-markdown{overflow-wrap:anywhere;line-height:1.85}
+.message-markdown{overflow-wrap:anywhere;line-height:1.95}
+/* Editorial conversation: formatting defines the assistant response, without a surrounding card. */
+.conversation-message.ai .bubble{width:100%;max-width:100%}
+.conversation-message.ai .bubble .txt{padding:0 0 0 32px;border:0;border-radius:0;background:transparent;box-shadow:none;font-size:15px;line-height:1.8;color:var(--ink2)}
+.conversation-message.ai{margin-bottom:18px}
+.session-receipt-wrap{margin:8px 0 24px 32px;min-width:0}
+@media(max-width:600px){.session-receipt-wrap{margin-left:0}}
+.message-author{display:flex;align-items:center;gap:9px;margin:3px 0 15px;font-size:11px;font-weight:500;color:#6d857c;letter-spacing:.3px}
+.assistant-mark{display:grid;place-items:center;flex-shrink:0;width:23px;height:23px;border:1px solid #cbdfd4;border-radius:7px;background:#fff;color:#2a8870}
+.assistant-mark svg{width:14px;height:14px}
+.conversation-message.ai .message-markdown :deep(h1){font-size:22px;letter-spacing:-.4px;line-height:1.55;margin:24px 0 13px}
+.conversation-message.ai .message-markdown :deep(h2){font-size:19px;line-height:1.6;margin:23px 0 11px}
+.conversation-message.ai .message-markdown :deep(h3){font-size:16px;line-height:1.65;margin:21px 0 10px}
+.conversation-message.ai .message-markdown :deep(strong){color:#244c41;font-weight:650}
+.message-arrive{animation:conversation-arrive .2s cubic-bezier(.2,.65,.3,1) both}
+@keyframes conversation-arrive{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.message-markdown :deep(.message-technical){margin-top:16px;padding-top:10px;border-top:1px solid #dbe9e5;font-size:12px;color:#718d91}
+.message-markdown :deep(.message-technical>summary){cursor:pointer;width:fit-content;color:#527b7d;line-height:1.8}
+.message-markdown :deep(.message-technical>summary:hover){color:#087f73}
+.message-markdown :deep(.message-technical>summary:focus-visible){outline:2px solid #168b7e;outline-offset:3px}
+.message-markdown :deep(.message-original){margin-top:10px;padding:12px 14px;border-radius:8px;background:#f5f9f7;font-size:13px;line-height:1.85;color:#58767d}
+.composer-session-error{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:7px 12px;border-top:1px solid #eed9b8;color:#8d581d;font-size:12px;line-height:1.6}.composer-session-error span{flex:1 1 280px;overflow-wrap:anywhere}.composer-session-error button{padding:3px 7px;border:1px solid #d9c7a9;border-radius:6px;background:#fff;color:#735123;font:inherit;cursor:pointer}.composer-session-error button:hover:not(:disabled){background:#f8efdf;color:#654412}.composer-session-error button:focus-visible{outline:2px solid #168b7e;outline-offset:2px}
+.conversation-check{text-align:right;margin:4px 0 14px}.conversation-check button{background:none;border:0;padding:4px;color:#63877e;font:inherit;font-size:12px;cursor:pointer}.conversation-check button:hover{color:#087b6c;text-decoration:underline}.conversation-check button:focus-visible{outline:2px solid #158f79;outline-offset:2px}.reply-checklist{margin:14px 0 22px 32px;padding:17px 19px;border:1px solid #b5d5cb;border-radius:10px;background:#fff;color:#315f69}.reply-checklist h4{margin:0 0 8px;font-size:17px;color:#174c47}.reply-checklist-note{font-size:12px;color:#617f83;line-height:1.7}.reply-checklist ul{padding-left:21px;margin:12px 0}.reply-checklist li{line-height:1.8;margin:8px 0}.reply-checklist :deep(li>p){margin:0}.reply-checklist details{font-size:12px;border-top:1px solid #e0ece7;padding-top:10px}.reply-checklist summary{cursor:pointer}.message-markdown :deep(.platform-run-notice){font-size:13px;line-height:1.8;margin:10px 0;padding:10px 13px;border-left:2px solid #d7b572;background:#fffaf1}.message-markdown :deep(.platform-run-notice details){font-size:12px}.message-markdown :deep(.message-timeout){padding:14px 16px;border:1px solid #e5cc9c;border-radius:10px;background:#fff8ec;color:#79561d;line-height:1.8;margin:12px 0}.message-markdown :deep(.message-timeout strong){color:#79561d}.message-markdown :deep(.message-timeout details){font-size:12px}.message-markdown :deep(.message-processing-note){color:#6b858b;font-size:13px}
 .message-markdown :deep(ul>li::before){content:none}
 .message-markdown :deep(blockquote p){margin:0}
 .message-markdown :deep(th){font-weight:700;color:var(--ink)}
-.message-markdown :deep(p){margin:0 0 10px}
+.message-markdown :deep(p){margin:0 0 9px}
 .message-markdown :deep(p:last-child){margin-bottom:0}
 .message-markdown :deep(h1),.message-markdown :deep(h2),.message-markdown :deep(h3),.message-markdown :deep(h4){margin:16px 0 8px;font-size:15px;line-height:1.6;color:var(--ink)}
 .message-markdown :deep(:first-child){margin-top:0}
 .message-markdown :deep(ul),.message-markdown :deep(ol){margin:8px 0;padding-left:24px;list-style:revert}
-.message-markdown :deep(li){margin:4px 0;padding-left:0}
+.message-markdown :deep(li){margin:6px 0;padding-left:0}
 .message-markdown :deep(blockquote){margin:10px 0;padding-left:12px;border-left:3px solid var(--blue-200);color:var(--ink3)}
 .message-markdown :deep(table){display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:10px 0;font-size:13px}
 .message-markdown :deep(th),.message-markdown :deep(td){padding:7px 10px;border:1px solid var(--line);text-align:left;min-width:70px}
@@ -1645,18 +1802,45 @@ button:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid #0
 .material-dialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--line);background:#fff}
 .material-dialog-actions .dl{width:auto;padding:8px 14px}
 
-.next-action-card{margin:4px 0 16px;padding:16px 18px;border:2px solid #219C8C;border-left-width:5px;border-radius:14px;background:linear-gradient(110deg,#E6F5EF,#F4FAF8);box-shadow:0 4px 14px rgba(11,110,104,.1)}
-.next-action-heading{display:flex;align-items:center;gap:9px;color:#075F56;font-size:15px}
-.next-action-heading>span{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#0B8E80;color:#fff;font-weight:700}
-.next-action-card>p{margin:6px 0 10px;color:#456F66;font-size:12px}
-.next-action-card .conversation-action{min-height:40px;font-size:13px;box-shadow:0 3px 8px rgba(11,110,104,.12)}
-.next-action-card .conversation-action:focus-visible{outline:3px solid #64B9A8;outline-offset:3px}
+.next-action-card{margin:8px 0 24px 32px;padding:21px 0 0;border:0;border-top:1px solid #b9d0c2;border-radius:0;background:transparent;box-shadow:none}
+.next-action-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:#315c47;font-size:14px}
+.next-action-heading strong{font-weight:700}
+.next-action-heading>span{color:#5e7b6c;font-size:12px;font-weight:500}
+.next-action-card>p{margin:9px 0 0;color:#4f7160;font-size:13.5px;font-weight:500;line-height:1.85}
+.next-action-card .conversation-actions{gap:8px 12px;margin-top:14px;align-items:center}
+.next-action-card .conversation-action{display:inline-flex;align-items:center;justify-content:space-between;gap:16px;min-height:40px;padding:10px 13px;border:1px solid transparent;border-radius:8px;background:transparent;color:#315f49;font-size:14px;font-weight:600;box-shadow:none;margin:0;transition:background .16s ease,border-color .16s ease,transform .12s ease,box-shadow .16s ease}
+.next-action-card .conversation-action.primary{background:#1b6655;border-color:#1b6655;color:#fff;padding:10px 16px;box-shadow:inset 0 1px 0 #ffffff12,0 1px 2px #153a2c08}
+.next-action-card .conversation-action:hover:not(:disabled){background:#e9f3ed;border-color:#d4e5d8;box-shadow:none}
+.next-action-card .conversation-action.primary:hover:not(:disabled){background:#155543;border-color:#155543;color:#fff;box-shadow:0 3px 8px #174d3414}
+.next-action-card .conversation-action:active:not(:disabled){transform:translateY(1px) scale(.99);box-shadow:inset 0 1px 2px #174d3412}
+.action-arrow{flex-shrink:0;font-size:16px;font-weight:600;transition:transform .16s ease;color:inherit}
+.next-action-card .conversation-action:hover:not(:disabled) .action-arrow{transform:translateX(3px)}
+.next-action-card .conversation-action:focus-visible{outline:2px solid #478d72;outline-offset:3px}
+.next-action-card .conversation-action:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+@media(prefers-reduced-motion:reduce){.message-arrive,.thinking i{animation:none}.next-action-card .conversation-action,.action-arrow{transition:none}.next-action-card .conversation-action:active:not(:disabled),.next-action-card .conversation-action:hover:not(:disabled) .action-arrow{transform:none}}
 @media(max-width:1100px){.steps{grid-template-columns:repeat(4,minmax(0,1fr))}.flow-tools{flex-wrap:wrap;flex-shrink:1}}
-@media(max-width:600px){.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.wtop{padding:10px 12px}.wt{max-width:180px}.next-action-card{padding:12px}}
+@media(max-width:600px){.reply-checklist{margin-left:0}.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.wtop{padding:10px 12px}.wt{max-width:180px}.next-action-card{padding:16px 0 0;margin-left:0}.next-action-heading{flex-wrap:wrap;gap:4px}.conversation-message.ai .bubble .txt{padding-left:0}}
 .conversation-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .conversation-action{padding:9px 14px;border:1px solid #A4CFC5;border-radius:10px;background:#fff;color:var(--blue-700);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s}
 .conversation-action:hover:not(:disabled){background:#EAF7F2;border-color:#54AF9E;box-shadow:0 3px 8px rgba(11,110,104,.1)}
 .conversation-action.primary{background:linear-gradient(120deg,#087C74,#139EAA);border-color:transparent;color:#fff;margin-right:8px;margin-bottom:6px}
 .conversation-action.primary:hover:not(:disabled){background:linear-gradient(120deg,#087C74,#139EAA);color:#fff;border-color:#087C74;filter:none}
 .conversation-action:disabled{opacity:.5;cursor:not-allowed}
+
+/* Compact research display controls, scoped to the existing drawer. */
+.sidebar-progress{width:fit-content;max-width:100%;margin-bottom:8px;border:1px solid #9ACCC2;border-radius:8px;background:#fff;overflow:hidden}
+.sidebar-progress[open]{width:100%}
+.sidebar-progress summary{display:flex;align-items:center;gap:6px;width:fit-content;padding:5px 8px;cursor:pointer;list-style:none;color:var(--ink);font-size:12px;font-weight:700}
+.sidebar-progress summary::-webkit-details-marker{display:none}
+.progress-square{display:grid;place-items:center;min-width:24px;height:24px;padding:0 4px;box-sizing:border-box;border-radius:6px;background:#E5F5F0;color:#087D72;font-size:12px}
+.progress-chevron{margin-left:2px;transition:transform .2s}.sidebar-progress[open] .progress-chevron{transform:rotate(180deg)}
+.sidebar-steps{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:0 12px 12px;margin:0;list-style:none}.sidebar-steps li{display:flex;align-items:center;gap:6px;padding:7px;border-radius:7px;font-size:11px;color:var(--ink3);background:#F4F8F7}.sidebar-steps li.current{color:#087D72;background:#E0F3ED;font-weight:700}.sidebar-steps li>span{font-variant-numeric:tabular-nums}.sidebar-steps small{margin-left:auto;font-size:10px}
+.sidebar-switch{display:flex;gap:4px;padding:4px;margin-bottom:14px;background:#DFEFEB;border-radius:11px}.sidebar-switch button{flex:1;border:0;border-radius:8px;background:transparent;padding:9px;color:#5A7C75;font:inherit;font-size:13px;cursor:pointer;transition:background .18s,color .18s,box-shadow .18s}.sidebar-switch button.selected{background:#fff;color:#087D72;font-weight:700;box-shadow:0 2px 6px #0B6E6818}.sidebar-switch button:hover{color:#087D72;background:#F3FBF8}
+.sidebar-flow{padding:16px;animation:sidebar-reveal .2s ease}.flow-caption{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:14px}.flow-caption small{margin-left:auto;color:var(--ink3);font-size:11px}.flow-caption-dot{width:8px;height:8px;border-radius:50%;background:#12A594}.flow-caption-dot.pulsing{animation:sidebar-pulse 1.8s ease-in-out infinite}.sidebar-note{margin:10px 12px;color:var(--ink3);font-size:12px;line-height:1.7}.sidebar-flow .sidebar-note{margin:8px 0 0}.research-route{display:block;width:100%;margin:8px 0}.route-halo{fill:transparent}.route-node{fill:#F1F7F5;stroke:#BCD7CF;stroke-width:1.5}.route-code{fill:#6D8C85;font-size:13px;font-weight:700}.route-label{fill:#6D8C85;font-size:12px}.research-route .active .route-node{fill:#0B9788;stroke:#087D72}.research-route .active .route-code{fill:#fff}.research-route .active .route-halo{fill:#D8F1E9}.research-route .active.running .route-halo{animation:sidebar-pulse 1.8s ease-in-out infinite;transform-box:fill-box;transform-origin:center}.research-route g:hover .route-node{stroke:#0B9788;stroke-width:2.5}
+.demo-picker{display:flex;flex-wrap:wrap;gap:6px}.demo-picker button,.artifact-display-options button{border:1px solid #A9D2C9;border-radius:8px;background:#fff;color:#087D72;padding:6px 9px;font:inherit;font-size:12px;cursor:pointer}.demo-picker button.selected{background:#DFF3ED;border-color:#0B9788}.sidebar-animation{margin-top:14px}.artifact-display-options{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;color:var(--ink3);font-size:11px}.artifact-display-options button:hover,.demo-picker button:hover{background:#E9F7F2;box-shadow:0 2px 6px #0B6E6818}.sidebar-progress summary:focus-visible,.sidebar-switch button:focus-visible,.demo-picker button:focus-visible,.artifact-display-options button:focus-visible{outline:2px solid #087D72;outline-offset:-2px}
+@keyframes sidebar-reveal{from{opacity:.5;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}@keyframes sidebar-pulse{50%{opacity:.5}}
+@media(prefers-reduced-motion:reduce){.sidebar-flow,.flow-caption-dot.pulsing,.research-route .active.running .route-halo{animation:none}.sidebar-switch button,.progress-chevron{transition:none}}
+
+
+.record-deliverables{margin-top:22px;padding:16px;border:1px solid #ACD2C8;border-radius:12px;background:#fff}.record-deliverables h4{display:flex;align-items:center;gap:8px;margin:0 0 12px;color:#123F38;font-size:14px}.record-deliverables h4 span{padding:2px 7px;border-radius:12px;background:#E3F3ED;color:#16816B;font-size:11px}.record-deliverable{margin-top:8px;border:1px solid #C8E1D8;border-radius:9px;background:#F8FCFA;overflow:hidden}.record-deliverable summary{padding:11px 13px;cursor:pointer;font-size:13px;font-weight:700;color:#256858}.record-deliverable summary:hover{background:#EAF6EF}.record-content{margin:0;padding:14px;border-top:1px solid #D8E9E1;white-space:pre-wrap;overflow-wrap:anywhere;background:#fff;font-size:13px;line-height:1.75}.record-scope{margin:12px 0;padding:9px 12px;border-radius:8px;background:#FFF8E9;color:#806B3D;font-size:12px}.record-scope summary{cursor:pointer}.record-scope p,.record-scope li{line-height:1.65;overflow-wrap:anywhere}
 </style>

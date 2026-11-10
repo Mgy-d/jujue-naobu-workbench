@@ -102,8 +102,8 @@ test('after resume to a new gate only the consumed old tool is cleaned; failure 
 test('a delayed stop request blocks a second run until its outcome is known',async()=>{const {ResearchRunSession}=await subject(),d=deps();let finishRun,finishStop,calls=0;d.run=async()=>{calls++;return new Promise(resolve=>{if(calls===1)finishRun=resolve;else resolve({status:'success',message:'',texts:{a:'second'},interrupts:[]})})};d.stop=async(agent,thread)=>new Promise(resolve=>finishStop=()=>resolve({session_id:thread,interrupted:true}));const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;const first=s.start('A');await new Promise(resolve=>setTimeout(resolve,0));const stopping=s.stopServer();finishRun({status:'success',message:'',texts:{a:'finished'},interrupts:[]});await first;await s.start('B');assert.equal(calls,1);finishStop();await stopping;assert.equal(s.status,'uncertain')})
 test('recovery obtains a background gate run ID only from a matching recorded interrupt event',async()=>{const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'background:call-bg',toolCallId:'call-bg'};d.pending=async()=>[bg];d.events=async()=>[{runId:'run-background',payload:{type:'RUN_FINISHED',threadId:'main-uuid',runId:'run-background',outcome:{type:'interrupt',interrupts:[bg]}}}];const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');await s.recover();assert.equal(s.status,'interrupt');assert.equal(s.identity.runId,'run-background');assert.equal(s.interrupts[0].id,'background:call-bg')})
 
-test('background forms with ambiguous recorded runs remain blocked',async()=>{const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'background:call-bg',toolCallId:'call-bg'};d.pending=async()=>[bg];d.events=async()=>['run-one','run-two'].map(runId=>({runId,payload:{type:'RUN_FINISHED',threadId:'main-uuid',runId,outcome:{type:'interrupt',interrupts:[bg]}}}));const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');const before=s.identity.runId;await s.recover();assert.equal(s.status,'uncertain');assert.equal(s.identity.runId,before);assert.match(s.error,/运行身份/);assert.deepEqual(s.interrupts,[])})
-test('background form events for another session cannot supply a run identity',async()=>{const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'background:call-bg',toolCallId:'call-bg'};d.pending=async()=>[bg];d.events=async()=>[{runId:'other-run',payload:{type:'RUN_FINISHED',threadId:'other-session',runId:'other-run',outcome:{type:'interrupt',interrupts:[bg]}}}];const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');await s.recover();assert.equal(s.status,'uncertain');assert.match(s.error,/运行身份/)})
+test('background forms with ambiguous recorded runs remain blocked',async()=>{const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'background:call-bg',toolCallId:'call-bg'};d.pending=async()=>[bg];d.events=async()=>['run-one','run-two'].map(runId=>({runId,payload:{type:'RUN_FINISHED',threadId:'main-uuid',runId,outcome:{type:'interrupt',interrupts:[bg]}}}));const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');const before=s.identity.runId;await s.recover();assert.equal(s.status,'uncertain');assert.equal(s.identity.runId,before);assert.match(s.error,/运行身份|未恢复/);assert.deepEqual(s.interrupts,[])})
+test('background form events for another session cannot supply a run identity',async()=>{const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'background:call-bg',toolCallId:'call-bg'};d.pending=async()=>[bg];d.events=async()=>[{runId:'other-run',payload:{type:'RUN_FINISHED',threadId:'other-session',runId:'other-run',outcome:{type:'interrupt',interrupts:[bg]}}}];const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');await s.recover();assert.equal(s.status,'uncertain');assert.match(s.error,/运行身份|未恢复/)})
 
 test('a successful response does not claim the session finished while background work remains',async()=>{const {ResearchRunSession}=await subject(),d=deps();d.runStatus=async()=>({running:false,pendingWork:true});const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');assert.equal(s.status,'working');assert.match(s.notice,/后台/)})
 test('an unavailable status check after successful stream keeps session uncertain',async()=>{const {ResearchRunSession}=await subject(),d=deps();d.runStatus=async()=>{throw Error('network')};const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');assert.equal(s.status,'uncertain');assert.match(s.error,/核对/)})
@@ -566,4 +566,235 @@ test('refresh of annotated G3 approval exposes G4 choice and only an explicit cl
   assert.equal(sends,0);assert.equal(s.status,'awaiting');assert.equal(s.nextStage,'G4')
   await s.start('确认进入 G4',{requireModelProbe:false,allowIdleMessage:true})
   assert.equal(sends,1)
+})
+
+
+const unresolvedMessage='Thread has unresolved interrupts; RunAgentInput.resume must address all of them'
+async function rejectedForPending(){
+ const {ResearchRunSession}=await subject(),d=deps(),storage=fixture()
+ d.run=async(identity,request,onEvent)=>{onEvent({type:'RUN_STARTED',threadId:identity.threadId,runId:identity.runId});return {status:'error',message:unresolvedMessage,texts:{},interrupts:[]}}
+ const s=new ResearchRunSession(storage,d,()=> 'owner',()=> 'pending-proof')
+ await s.select(scope);s.probePassed=true;await s.start('研究')
+ return {s,d,storage,ResearchRunSession}
+}
+test('a server unresolved-interrupt rejection replaces the stale waiting notice with a persistent recovery requirement',async()=>{
+ const {s}=await rejectedForPending()
+ assert.equal(s.status,'uncertain');assert.equal(s.identity.unresolvedInterrupts,true)
+ assert.match(s.error,/未处理|未决/);assert.doesNotMatch(s.notice,/等待智能体回复/)
+})
+test('empty form registry and unavailable framework snapshot cannot erase a server-reported pending block after recovery or refresh',async()=>{
+ const {s,d,storage,ResearchRunSession}=await rejectedForPending();let sends=0
+ d.run=async()=>{sends++;throw Error('must not send')};d.live=async()=>null
+ d.runStatus=async()=>({running:false,awaitingInput:true})
+ await s.recover({readOnly:true});assert.equal(s.status,'uncertain');assert.match(s.error,/实时待办接口不可用/)
+ await s.start('继续',{allowIdleMessage:true});assert.equal(sends,0)
+ const restored=new ResearchRunSession(storage,d,()=> 'owner');await restored.select(scope)
+ assert.equal(restored.identity.unresolvedInterrupts,true);assert.equal(restored.status,'uncertain')
+ await restored.start('继续',{allowIdleMessage:true,requireModelProbe:false});assert.equal(sends,0)
+})
+test('live pending identifiers without readable form content keep the session blocked with an actionable explanation',async()=>{
+ const {s,d}=await rejectedForPending();d.live=async()=>['reply:still-open']
+ await s.recover({readOnly:true});assert.equal(s.status,'uncertain');assert.equal(s.identity.unresolvedInterrupts,true)
+ assert.match(s.error,/1.*未决待办.*表单/);assert.deepEqual(s.interrupts,[])
+})
+test('a matched original form can still be recovered and submitted explicitly after pending rejection',async()=>{
+ const {s,d}=await rejectedForPending()
+ const form={...gate,metadata:{...gate.metadata,runId:s.identity.runId}}
+ d.pending=async()=>[form];d.live=async()=>[form.id];let requests=0
+ await s.recover({readOnly:true});assert.equal(s.status,'interrupt');assert.equal(s.interrupts[0].id,form.id);assert.equal(requests,0)
+ d.run=async(identity,request)=>{requests++;assert.equal(request.resume[0].interruptId,form.id);d.pending=async()=>[];return {status:'success',message:'',texts:{},interrupts:[]}}
+ d.transcript=async()=>({messages:successfulGateMessages})
+ await s.submit({[form.id]:{decision:'通过',feedback:'synthetic test only'}})
+ assert.equal(requests,1);assert.notEqual(s.identity.unresolvedInterrupts,true)
+})
+test('only an explicit empty live snapshot with idle status can clear the missing-form recovery requirement',async()=>{
+ const {s,d}=await rejectedForPending();d.live=async()=>[];d.runStatus=async()=>({running:false,awaitingInput:true})
+ await s.recover({readOnly:true});assert.equal(s.status,'awaiting');assert.notEqual(s.identity.unresolvedInterrupts,true)
+})
+test('a transport-level pending rejection also records the recovery requirement without retaining a waiting notice',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps();d.run=async()=>{throw Error(unresolvedMessage)}
+ const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究')
+ assert.equal(s.identity.unresolvedInterrupts,true);assert.match(s.error,/未处理|未决/);assert.doesNotMatch(s.notice,/等待智能体回复/)
+})
+
+test('a pre-fix identity can recover its unresolved rejection from an exact same-run server event',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),storage=fixture()
+ const s=new ResearchRunSession(storage,d,()=> 'owner',()=> 'legacy')
+ await s.select(scope);s.probePassed=true;await s.start('研究')
+ // An old client retained only uncertain status, before the recovery marker existed.
+ const before=s.identity;s.identity={...before,status:'uncertain'};s.status='uncertain'
+ d.runStatus=async()=>({running:false,awaitingInput:true});d.live=async()=>null
+ d.events=async()=>[{runId:before.runId,payload:{type:'RUN_ERROR',threadId:before.threadId,runId:before.runId,message:unresolvedMessage}}]
+ await s.recover({readOnly:true})
+ assert.equal(s.identity.unresolvedInterrupts,true);assert.equal(s.status,'uncertain');assert.match(s.error,/实时待办接口不可用/)
+})
+test('another session or another run error cannot manufacture a pending recovery requirement',async()=>{
+ for(const foreign of ['thread','run']){
+  const {ResearchRunSession}=await subject(),d=deps();const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'legacy')
+  await s.select(scope);s.probePassed=true;await s.start('研究');s.status='uncertain'
+  d.runStatus=async()=>({running:false,awaitingInput:true})
+  d.events=async()=>[{runId:foreign==='run'?'other':s.identity.runId,payload:{type:'RUN_ERROR',threadId:foreign==='thread'?'other':s.identity.threadId,runId:foreign==='run'?'other':s.identity.runId,message:unresolvedMessage}}]
+  await s.recover({readOnly:true});assert.notEqual(s.identity.unresolvedInterrupts,true)
+ }
+})
+
+test('a confirmed clear snapshot remains cleared after refresh and does not resurrect its earlier rejection event',async()=>{
+ const {s,d,storage,ResearchRunSession}=await rejectedForPending();const oldRun={...s.identity}
+ d.live=async()=>[];d.runStatus=async()=>({running:false,awaitingInput:true})
+ await s.recover({readOnly:true})
+ d.live=async()=>null
+ d.events=async()=>[{runId:oldRun.runId,payload:{type:'RUN_ERROR',threadId:oldRun.threadId,runId:oldRun.runId,message:unresolvedMessage}}]
+ const restored=new ResearchRunSession(storage,d,()=> 'owner');await restored.select(scope)
+ await restored.recover({readOnly:true});assert.equal(restored.identity.unresolvedInterrupts,false);assert.equal(restored.status,'awaiting')
+})
+
+test('a transcript-proven plan confirmation recovers without a registry and rechecks the same plan before explicit approval',async()=>{
+ const {s,d}=await rejectedForPending(),plan={id:'plan-reply:plan-call',toolCallId:'plan-call',metadata:{toolName:'plan_exit',toolInput:{summary:'仅整理研究计划，不执行统计。'}}}
+ const messages=[{id:'plan-reply',role:'assistant',content:[{type:'tool_call',id:'plan-call',name:'plan_exit',state:'asking',input:JSON.stringify(plan.metadata.toolInput)}]}]
+ d.transcript=async()=>({messages});d.pending=async()=>[];d.live=async()=>null;d.historyEvents=async()=>[{runId:'original-plan-run',payload:{type:'RUN_FINISHED',threadId:s.identity.threadId,runId:'original-plan-run',outcome:{type:'interrupt',interrupts:[plan]}}}]
+ let calls=0,removed=0;d.remove=async()=>{removed++}
+ await s.recover({readOnly:true});assert.equal(s.status,'interrupt');assert.equal(s.identity.runId,'original-plan-run');assert.equal(calls,0)
+ d.run=async(identity,request)=>{calls++;assert.equal(identity.runId,'original-plan-run');assert.equal(request.resume[0].payload.approved,true);d.transcript=async()=>({messages:[...messages,{role:'assistant',content:[{type:'tool_result',id:'plan-call',state:'success'}]}]});return {status:'success',message:'',texts:{},interrupts:[]}}
+ await s.submit({[plan.id]:{decision:'同意按此计划执行'}})
+ assert.equal(calls,1);assert.equal(removed,0);assert.notEqual(s.halted,true)
+})
+test('a recovered plan that changed before submission cannot be approved',async()=>{
+ const {s,d}=await rejectedForPending(),plan={id:'plan-reply:plan-call',toolCallId:'plan-call',metadata:{toolName:'plan_exit',toolInput:{summary:'原始计划'}}}
+ const messages=[{id:'plan-reply',role:'assistant',content:[{type:'tool_call',id:'plan-call',name:'plan_exit',state:'asking',input:JSON.stringify(plan.metadata.toolInput)}]}]
+ d.transcript=async()=>({messages});d.pending=async()=>[];d.live=async()=>null;d.historyEvents=async()=>[{runId:'original-plan-run',payload:{type:'RUN_FINISHED',threadId:s.identity.threadId,runId:'original-plan-run',outcome:{type:'interrupt',interrupts:[plan]}}}]
+ await s.recover({readOnly:true});let calls=0;d.run=async()=>{calls++;throw Error('must not send')}
+ d.transcript=async()=>({messages:[]})
+ await s.submit({[plan.id]:{decision:'同意按此计划执行'}});assert.equal(calls,0);assert.match(s.error,/计划.*变化|待答表单.*变化/)
+})
+
+
+test('watchdog handoff restores original conversation and only explicit user input starts another run',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+ await s.select(scope);await s.start('研究',{requireModelProbe:false});const thread=s.identity.threadId
+ d.runStatus=async()=>({running:false,pendingWork:false,manualAttention:true})
+ const text='[进度] 阶段=G3 完成=G1、G2 已通过 进行中=无 剩余=G3、G4 下步=等团队交付原始数据 csv 状态=已阻塞'
+ d.transcript=async()=>({messages:[{id:'g3',role:'assistant',content:[{type:'text',text}]}]})
+ d.live=async()=>null
+ let sends=0,request;d.run=async(identity,input)=>{sends++;request=input;assert.equal(identity.threadId,thread);return {status:'success',message:'',texts:{a:'请补充数据'},interrupts:[]}}
+ await s.recover({readOnly:true});assert.equal(s.status,'awaiting');assert.match(s.notice,/停止自动补醒/);assert.equal(s.serverPhase,'G3');assert.equal(sends,0)
+ await s.start('请列出缺少的原始数据，暂不执行统计。',{requireModelProbe:false,allowIdleMessage:true})
+ assert.equal(sends,1);assert.equal(request.threadId,thread);assert.equal(s.identity.threadId,thread)
+})
+
+test('manual handoff never bypasses active work, pending forms or unverified tool results',async()=>{
+ for(const mode of ['running','background','pending','live','tool','approval','conflict']){
+  const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+  await s.select(scope);await s.start('研究',{requireModelProbe:false})
+  d.runStatus=async()=>({running:false,pendingWork:false,manualAttention:true})
+  d.live=async()=>[];await s.recover({readOnly:true});assert.equal(s.status,'awaiting')
+  if(mode==='running')d.runStatus=async()=>({running:true,manualAttention:true})
+  if(mode==='background')d.runStatus=async()=>({running:false,pendingWork:true,manualAttention:true})
+  if(mode==='pending')d.pending=async()=>[gate]
+  if(mode==='live')d.live=async()=>[gate.id]
+  if(mode==='tool')d.transcript=async()=>({messages:[{role:'assistant',content:[{type:'tool_call',id:'unresolved',name:'plan_exit',state:'asking'}]}]})
+  if(mode==='approval')s.identity.submittedIds=[gate.id]
+  if(mode==='conflict')d.transcript=async()=>({messages:[...successfulGateMessages,{role:'assistant',content:[{type:'tool_result',id:'call1',state:'success',output:'HITL_TIMEOUT'}]}]})
+  let sends=0;d.run=async()=>{sends++;throw Error('must not send')}
+  await s.start('继续对话',{requireModelProbe:false,allowIdleMessage:true});assert.equal(sends,0,mode)
+ }
+})
+
+
+test('pending form from an earlier run recovers using exact same-session history without sending',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'bg:call-bg',toolCallId:'call-bg'};let sent=0,historyReads=0
+ d.pending=async()=>[bg];d.events=async()=>[];d.historyEvents=async()=>{historyReads++;return serverGateEvents(bg)}
+ const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究')
+ d.run=async()=>{sent++;throw Error('must not send')}
+ await s.recover({readOnly:true});assert.equal(s.status,'interrupt');assert.equal(s.identity.runId,'srv-real');assert.equal(s.interrupts[0].id,bg.id);assert.equal(sent,0);assert.ok(historyReads>0)
+})
+test('history recovery refuses ambiguous and foreign bindings and never clears original identity',async()=>{
+ const {ResearchRunSession}=await subject(),bg={...gate,id:'bg:call-bg',toolCallId:'call-bg'}
+ for(const events of [[...serverGateEvents(bg),...serverGateEvents(bg,'srv-other')],serverGateEvents(bg,'srv-real','foreign')]){
+  const d=deps();d.pending=async()=>[bg];d.events=async()=>[];d.historyEvents=async()=>events
+  const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');const run=s.identity.runId
+  await s.recover({readOnly:true});assert.equal(s.status,'uncertain');assert.equal(s.identity.runId,run);assert.equal(s.interrupts.length,0)
+ }
+})
+
+
+test('server-recorded run-prefixed lifecycle restores an exact form with JSON-string registry input',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'bg:call-bg',toolCallId:'call-bg',metadata:{...gate.metadata,toolInput:JSON.stringify(gate.metadata.toolInput)}}
+ d.pending=async()=>[bg];d.events=async()=>[];d.historyEvents=async()=>serverGateEvents(gateWithId(),'run-authoritative')
+ function gateWithId(){return {...gate,id:bg.id,toolCallId:bg.toolCallId}}
+ const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');await s.recover({readOnly:true})
+ assert.equal(s.status,'interrupt');assert.equal(s.identity.runId,'run-authoritative');assert.equal(s.interrupts[0].id,bg.id)
+})
+test('terminal form matches JSON-string registry to equivalent object without weakening option checks',async()=>{
+ for(const mismatch of [false,true]){
+  const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'bg:call-bg',toolCallId:'call-bg',metadata:{...gate.metadata,toolInput:JSON.stringify(gate.metadata.toolInput)}}
+  const candidate={...bg,metadata:{...gate.metadata,toolInput:mismatch?{title:'wrong'}:gate.metadata.toolInput}}
+  d.pending=async()=>[bg];d.events=async()=>[];d.historyEvents=async()=>[{runId:'run-original',payload:{type:'RUN_FINISHED',threadId:'main-uuid',runId:'run-original',outcome:{type:'interrupt',interrupts:[candidate]}}}]
+  const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');await s.recover({readOnly:true})
+  assert.equal(s.status,mismatch?'uncertain':'interrupt')
+ }
+})
+
+
+test('failed binding exports targeted lifecycle diagnostics without account tokens or full transcript',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),bg={...gate,id:'bg:call-bg',toolCallId:'call-bg'}
+ d.pending=async()=>[bg];d.events=async()=>[];d.historyEvents=async()=>serverGateEvents(bg).slice(1)
+ const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope);s.probePassed=true;await s.start('研究');await s.recover({readOnly:true})
+ assert.equal(s.status,'uncertain');assert.equal(s.interrupts.length,0);assert.ok(s.recoveryDiagnostic.targetEvents.length>0);assert.deepEqual(s.recoveryDiagnostic.matchedRuns,[])
+ assert.ok(!JSON.stringify(s.recoveryDiagnostic).includes('access_token'));s.dispose();assert.equal(s.recoveryDiagnostic,null)
+})
+
+
+async function completedConversationFixture(){
+ const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+ await s.select(scope);await s.start('研究',{requireModelProbe:false})
+ s.identity.pendingIds=[gate.id];s.status='uncertain'
+ const messages=[{id:'old-form',role:'assistant',content:[{type:'tool_call',id:'call1',name:'ui_form_advanced',state:'asking'}]},{id:'old-timeout',role:'assistant',content:[{type:'tool_result',id:'call1',state:'error',output:'[HITL_TIMEOUT] 等待审核超时，已关闭'}]},{id:'latest',role:'assistant',content:[{type:'text',text:'请补充参考文献。\n[进度] 阶段=G4 完成=四阶段全部产物 进行中=无 剩余=参考文献 下步=等待团队提供上述材料 状态=等待人工'}]}]
+ d.transcript=async()=>({messages});d.pending=async()=>[];d.live=async()=>null;d.runStatus=async()=>({running:false,pendingWork:false,completedRun:true})
+ return {s,d,messages}
+}
+test('COMPLETED G4 accepts explicit literature input after a uniquely closed timeout, without resuming or approving the expired form',async()=>{
+ const {s,d}=await completedConversationFixture(),thread=s.identity.threadId;let sends=0,request,writes=0
+ d.register=d.remove=async()=>{writes++}
+ d.run=async(identity,input)=>{sends++;request=input;assert.equal(identity.threadId,thread);return {status:'success',message:'',texts:{a:'收到文献'},interrupts:[]}}
+ await s.recover({readOnly:true});assert.equal(s.status,'awaiting');assert.equal(sends,0)
+ await s.start('这是需要用到的参考文献：Hajli (2015)。',{requireModelProbe:false,allowIdleMessage:true})
+ assert.equal(sends,1);assert.equal(writes,0);assert.equal(request.resume,undefined);assert.match(JSON.stringify(request.messages),/Hajli/);assert.equal(s.identity.threadId,thread)
+})
+test('completed reply cannot bypass current work, live forms, contradictory results, uncertain state or current unresolved forms',async()=>{
+ for(const mode of ['running','background','pending','live','duplicate','submitted','unresolved-tool','not-completed']){
+  const {s,d,messages}=await completedConversationFixture()
+  if(mode==='running')d.runStatus=async()=>({running:true,completedRun:true})
+  if(mode==='background')d.runStatus=async()=>({running:false,pendingWork:true,completedRun:true})
+  if(mode==='pending')d.pending=async()=>[gate]
+  if(mode==='live')d.live=async()=>['call1']
+  if(mode==='duplicate')messages.push({role:'assistant',content:[{type:'tool_result',id:'call1',state:'success',output:'approved'}]})
+  if(mode==='submitted')s.identity.submittedIds=[gate.id]
+  if(mode==='unresolved-tool'){messages.push({role:'assistant',content:[{type:'tool_call',id:'other-plan',name:'plan_exit',state:'asking'}]});d.pending=async()=>[{id:'current:other-plan',toolCallId:'other-plan',metadata:{toolName:'plan_exit',toolInput:{summary:'current plan'}}}]}
+  if(mode==='not-completed')d.runStatus=async()=>({running:false,continuationUnknown:true})
+  let sends=0;d.run=async()=>{sends++;throw Error('must not send')}
+  await s.start('补充文献，不执行统计。',{requireModelProbe:false,allowIdleMessage:true});assert.equal(sends,0,mode)
+ }
+})
+
+
+test('a known server unresolved-interrupt rejection still requires the actual live registry even after COMPLETED',async()=>{
+ const {s,d}=await completedConversationFixture();s.identity.unresolvedInterrupts=true
+ let sends=0;d.run=async()=>{sends++;throw Error('must not send')}
+ await s.recover({readOnly:true});assert.match(s.error,/实时待办接口不可用/);assert.equal(s.identity.unresolvedInterrupts,true)
+ await s.start('补充文献',{allowIdleMessage:true,requireModelProbe:false});assert.equal(sends,0)
+})
+
+
+test('COMPLETED current idle state permits a normal message despite incomplete unrelated historical tool traces',async()=>{
+ for(const mode of ['old-read','old-plan','missing-old-call','old-result-format','missing-old-submission']){
+  const {s,d,messages}=await completedConversationFixture()
+  if(mode==='old-read')messages.unshift({id:'old-read',role:'assistant',content:[{type:'tool_call',id:'old-read',name:'read_file',state:'running'}]})
+  if(mode==='old-plan')messages.unshift({id:'old-plan',role:'assistant',content:[{type:'tool_call',id:'old-plan',name:'plan_exit',state:'asking'}]})
+  if(mode==='missing-old-call')s.identity.pendingIds=['ancient:missing-old-form']
+  if(mode==='old-result-format')messages[1].content[0].state='success'
+  if(mode==='missing-old-submission')s.identity.submittedIds=['older:missing-submission-result']
+  let sends=0,request;d.run=async(identity,input)=>{sends++;request=input;return {status:'success',message:'',texts:{a:'合成：收到文献'},interrupts:[]}}
+  await s.recover({readOnly:true});assert.equal(s.status,'awaiting',mode)
+  await s.start('补充文献，暂不执行统计',{requireModelProbe:false,allowIdleMessage:true});assert.equal(sends,1,mode);assert.equal(request.resume,undefined,mode)
+ }
 })

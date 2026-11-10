@@ -13,7 +13,7 @@
  *   目标 Java 后端 JWT 为 HS256，access token 默认有效期 30 分钟（可通过后端配置覆盖）。
  */
 
-import { http, saveTokens, authSnapshot, sameAuth, USER_ID_KEY, USER_INFO_KEY } from '@/api/http'
+import { http, saveTokens, authSnapshot, sameAuth, USER_ID_KEY, USER_INFO_KEY, DUAL_TOKEN, BUSINESS_AUTH_BASE, BUSINESS_USER_INFO_KEY, clearTokens, saveOAuthToken } from '@/api/http'
 
 export interface TokenResponse {
   accessToken: string
@@ -24,6 +24,7 @@ export interface TokenResponse {
   username?: string
   role: string
   permissions?: string[]
+  oauthAccessToken?: string
 }
 
 export interface UserInfoResponse {
@@ -31,6 +32,7 @@ export interface UserInfoResponse {
   username: string
   role: string
   createdAt?: string
+  permissions?: string[]
 }
 
 /** 注册接口返回用户信息，不返回 access/refresh token。 */
@@ -57,17 +59,32 @@ function persist(tokens: TokenResponse): void {
 }
 
 export const authApi = {
-  /** 账号密码登录，成功即落盘 token */
+  /** 两侧并行验证；默认身份仍为智能体身份，不迁移既有研究归属。 */
   async login(username: string, password: string): Promise<TokenResponse> {
-    // Local development alias only; OAuth still validates the supplied password.
+    clearTokens()
+    const snapshot = authSnapshot()
     const aliasTarget = import.meta.env.DEV && username.trim() === 'admin'
-      ? (import.meta.env.VITE_LOCAL_LOGIN_ALIAS_TARGET as string | undefined)?.trim()
-      : undefined
-    const tokens = await http.post<TokenResponse>(
-      '/api/auth/login',
-      { username: aliasTarget || username, password },
-      { skipAuth: true, timeoutMs: 10000 },
-    )
+      ? (import.meta.env.VITE_LOCAL_LOGIN_ALIAS_TARGET as string | undefined)?.trim() : undefined
+    const payload = {username: aliasTarget || username, password}
+    const login = (path: string) => http.post<TokenResponse>(path, payload, {skipAuth: true, timeoutMs: 10000})
+    const [agent, business] = await Promise.allSettled([
+      login('/api/auth/login'), DUAL_TOKEN ? login(BUSINESS_AUTH_BASE + '/login') : Promise.resolve(null),
+    ])
+    if (!sameAuth(snapshot)) throw new Error('登录状态已变化，请重新操作')
+    if (agent.status === 'rejected') throw new Error('智能体服务登录失败：' + (agent.reason instanceof Error ? agent.reason.message : '请稍后重试'))
+    if (!agent.value.accessToken) throw new Error('智能体服务未返回登录凭据')
+    // 不以另一侧凭据兜底，避免把不兼容的身份发往错误服务。
+    if (business.status === 'rejected') throw new Error('案例与会员服务登录失败：' + (business.reason instanceof Error ? business.reason.message : '请稍后重试'))
+    if (DUAL_TOKEN && !business.value?.accessToken) throw new Error('案例与会员服务未返回登录凭据')
+    const tokens = {...agent.value, permissions: business.value?.permissions ?? agent.value.permissions}
+    if (business.value) {
+      saveTokens(business.value.accessToken, business.value.refreshToken, 'biz')
+      saveOAuthToken(business.value.oauthAccessToken)
+      localStorage.setItem(BUSINESS_USER_INFO_KEY, JSON.stringify({
+        userId: business.value.userId, username: business.value.username || username,
+        role: business.value.role, permissions: business.value.permissions ?? [],
+      }))
+    }
     persist(tokens)
     return tokens
   },
@@ -86,17 +103,20 @@ export const authApi = {
       { skipAuth: true, timeoutMs: 10000 },
     )
     if (!sameAuth(snapshot)) throw new Error('登录状态已变化，请重新操作')
+    // 研究端刷新只更新研究身份，业务权限仍取业务侧登录结果。
+    if (DUAL_TOKEN) {
+      try { tokens.permissions = JSON.parse(localStorage.getItem(BUSINESS_USER_INFO_KEY) || '{}').permissions ?? tokens.permissions } catch {}
+    }
     persist(tokens)
     return tokens
   },
 
-  /** 登出：JWT 无状态，后端不吊销，仅作契约协调；失败也要清本地 */
+  /** 同时退出两侧；在发出请求后立即清凭据，晚返回不能恢复登录。 */
   async logout(): Promise<void> {
-    try {
-      await http.post<void>('/api/auth/logout', undefined, { timeoutMs: 5000 })
-    } catch {
-      // 网络错误或 401 都不影响本地退出
-    }
+    const requests = [http.post<void>('/api/auth/logout', undefined, {timeoutMs: 5000})]
+    if (DUAL_TOKEN) requests.push(http.post<void>(BUSINESS_AUTH_BASE + '/logout', undefined, {timeoutMs: 5000}))
+    clearTokens()
+    await Promise.allSettled(requests)
   },
 
   /* ── 以下端点来自 kuaike 登录框架，**尚未对 agent-platform 实测** ──────────

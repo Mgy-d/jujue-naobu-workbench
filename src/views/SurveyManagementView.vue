@@ -62,7 +62,7 @@
         <p v-if="snapshotError" role="alert">{{snapshotError}}</p>
         <button :disabled="busy || !selected.responseCount" @click="previewSnapshot">预览全部答卷范围</button>
         <div v-if="candidate" class="snapshot-candidate"><p>待确认 · {{selected.version}} · {{selected.batchName}} · {{candidate.rowCount}} 份答卷</p><p>生成于 {{formatTime(candidate.createdAt)}}，后续新增答卷需另建快照。</p><button :disabled="busy" @click="confirmSnapshot">确认使用这 {{candidate.rowCount}} 份答卷</button></div>
-        <ul><li v-for="snapshot in snapshots" :key="snapshot.id">{{formatTime(snapshot.createdAt)}} · {{snapshot.rowCount}} 份 · {{snapshot.confirmed?'已确认':'待确认'}} <button v-if="snapshot.confirmed" :disabled="busy" @click="handoff(snapshot)">交付原研究 G3</button><button v-else :disabled="busy" @click="candidate=snapshot">查看确认范围</button></li></ul>
+        <ul><li v-for="snapshot in snapshots" :key="snapshot.id">{{formatTime(snapshot.createdAt)}} · {{snapshot.rowCount}} 份 · {{snapshot.confirmed?'已确认':'待确认'}} <button v-if="snapshot.confirmed" :disabled="busy" @click="handoff(snapshot)">{{handoffs[snapshot.id]?'核对交付／继续':'交付原研究 G3'}}</button><small v-if="snapshot.confirmed"> · {{handoffStatus(handoffs[snapshot.id])}}</small><button v-else :disabled="busy" @click="candidate=snapshot">查看确认范围</button></li></ul>
       </section>
     </template>
     <p v-else-if="surveys.length" class="panel empty">选择问卷和批次后，查看回收概览与答卷。</p>
@@ -75,12 +75,18 @@ import {computed,onBeforeUnmount,ref,watch} from 'vue'
 import {useRouter} from 'vue-router'
 import {useUserStore} from '@/stores/user'
 import {collectionApi,type CollectionSurvey,type CollectionResponse,type CollectionSnapshot,type CollectionStats} from '@/api/researchCollection'
-import {uploadAttachment} from '@/api/attachment'
+import {researchCloud} from '@/api/researchCloud'
+import {loadResearchIdentity,saveResearchIdentity,type StoredResearchIdentity} from '@/utils/researchRunIdentity'
+import {fetchSessionTranscript} from '@/api/session'
+import {handoffProof,handoffStatus,type ResearchHandoff} from '@/utils/researchHandoff'
+import {fetchResearchWordFile} from '@/api/researchWordFile'
+import {uploadAttachment,listAttachments} from '@/api/attachment'
 import {configuredResearchAgent} from '@/config/researchAgent'
 import {currentResearchOwner,useResearchRuns} from '@/stores/researchRuns'
 interface Question {id:string;text:string;questionType:string;required?:boolean;options?:{code:string;label:string}[];scale?:{min:number;max:number;labels?:string[]}}
 interface Definition {questions:Question[];notice?:string}
 const router=useRouter(),user=useUserStore()
+const handoffs=ref<Record<string,ResearchHandoff>>({})
 const surveys=ref<CollectionSurvey[]>([]),selectedId=ref(''),responses=ref<CollectionResponse[]>([]),snapshots=ref<CollectionSnapshot[]>([]),candidate=ref<CollectionSnapshot|null>(null)
 const busy=ref(false),reading=ref(false),error=ref(''),message=ref(''),page=ref(1),total=ref(0),totalPages=ref(0),from=ref(''),until=ref('')
 const answer=ref<CollectionResponse|null>(null),answerDialog=ref<HTMLDialogElement|null>(null),questionDialog=ref<HTMLDialogElement|null>(null)
@@ -115,7 +121,7 @@ function answerText(id:string,value:unknown){
 function openAnswer(row:CollectionResponse){answer.value=row;answerDialog.value?.showModal()}
 function reset(){
   epoch++;controller?.abort();controller=new AbortController()
-  responses.value=[];snapshots.value=[];candidate.value=null;definition.value=null;stats.value=null;answer.value=null
+  responses.value=[];snapshots.value=[];handoffs.value={};candidate.value=null;definition.value=null;stats.value=null;answer.value=null
   answerDialog.value?.close();questionDialog.value?.close();questionId.value='';lastRead.value=''
   error.value='';message.value='';statsError.value='';rowsError.value='';definitionError.value='';snapshotError.value='';busy.value=false;reading.value=false
 }
@@ -140,7 +146,7 @@ async function readResponses(){
     const [rows,versions,source,summary]=await Promise.allSettled([collectionApi.responses(survey.id,page.value,controller?.signal,start,end),collectionApi.snapshots(survey.id,controller?.signal),collectionApi.definition(survey.id,controller?.signal),collectionApi.stats(survey.id,controller?.signal)])
     if(generation!==epoch || selectedId.value!==survey.id)return
     if(rows.status==='fulfilled'){responses.value=rows.value.items;total.value=rows.value.total;totalPages.value=rows.value.totalPages}else rowsError.value=failure(rows.reason,'答卷读取失败。')
-    if(versions.status==='fulfilled')snapshots.value=versions.value;else snapshotError.value=failure(versions.reason,'分析快照读取失败。')
+    if(versions.status==='fulfilled'){snapshots.value=versions.value;handoffs.value={};for(const snap of versions.value){try{const row=await researchCloud.get<ResearchHandoff>('artifact','survey-handoff:'+snap.id);if(generation!==epoch)return;if(row?.data.surveyId===survey.id&&row.data.snapshotId===snap.id)handoffs.value[snap.id]=row.data}catch(e){if(generation===epoch)snapshotError.value=failure(e,'交付记录读取失败。')}}}else snapshotError.value=failure(versions.reason,'分析快照读取失败。')
     if(source.status==='fulfilled' && Array.isArray((source.value as Definition)?.questions))definition.value=source.value as Definition;else definitionError.value=source.status==='rejected'?failure(source.reason,'题面读取失败。'):'问卷题面格式不完整。'
     if(summary.status==='fulfilled' && summary.value.surveyId===survey.id && summary.value.version===survey.version){
       stats.value=summary.value
@@ -159,32 +165,76 @@ async function closeBatch(){await act(async survey=>{const generation=epoch;cons
 async function previewSnapshot(){await act(async survey=>{const generation=epoch;const result=await collectionApi.previewSnapshot(survey.id);if(generation===epoch){if(result.surveyId!==survey.id)throw Error('快照所属批次不一致。');candidate.value=result}})}
 async function confirmSnapshot(){const preview=candidate.value;if(!preview)return;await act(async survey=>{const generation=epoch;const result=await collectionApi.confirmSnapshot(preview.id);if(generation===epoch){if(result.surveyId!==survey.id || result.id!==preview.id || !result.confirmed)throw Error('快照确认结果不一致。');candidate.value=null;snapshots.value=[result,...snapshots.value.filter(s=>s.id!==result.id)];message.value='数据快照已固定，可交付原研究 G3。'}})}
 async function handoff(snapshot:CollectionSnapshot){
-  await act(async survey=>{
-    const generation=epoch,owner=currentResearchOwner(),agent=configuredResearchAgent().id,session=useResearchRuns().session
-    message.value='正在核对原研究会话…'
-    if(!survey.sourceTaskId||!survey.sourceThreadId)throw Error('发布记录缺少原研究会话信息。')
-    await session.select({ownerId:owner,agentId:agent,taskId:survey.sourceTaskId})
-    if(generation!==epoch || owner!==currentResearchOwner())return
-    if(session.busy||session.identity?.threadId!==survey.sourceThreadId||session.identity.projectId!==survey.projectId)throw Error('当前浏览器尚未绑定此问卷的原研究，请在原研究所在浏览器交付。')
-    if(['running','working','interrupt'].includes(session.status))throw Error('原研究仍在运行或等待表单，请先处理后再交付。')
-    message.value='正在读取并校验固定数据快照…'
-    const csv=await collectionApi.snapshotBytes(snapshot.id)
-    if(generation!==epoch)return
-    const digest=await crypto.subtle.digest('SHA-256',csv)
-    const hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('')
-    if(hash!==snapshot.contentHash)throw Error('快照内容校验失败。')
+ await act(async survey=>{
+  const generation=epoch,owner=currentResearchOwner(),agent=configuredResearchAgent().id,session=useResearchRuns().session
+  const valid=()=>generation===epoch&&owner===currentResearchOwner()&&selectedId.value===survey.id
+  if(!snapshot.confirmed||snapshot.surveyId!==survey.id||!survey.sourceTaskId||!survey.sourceThreadId)throw Error('快照未确认或缺少原研究绑定，未交付。')
+  const scope={ownerId:owner,agentId:agent,taskId:survey.sourceTaskId},loaded=loadResearchIdentity(localStorage,scope)
+  if(!loaded.identity){
+   const archived=await researchCloud.get<{taskId:string;identity:StoredResearchIdentity}>('session',scope.taskId+':'+agent)
+   if(!valid())return
+   const identity=archived?.data.identity
+   if(archived?.data.taskId!==scope.taskId||identity?.ownerId!==owner||identity.agentId!==agent||identity.taskId!==scope.taskId||identity.threadId!==survey.sourceThreadId||identity.projectId!==survey.projectId)throw Error('数据库中没有与本问卷一致的原会话绑定，未创建替代研究。')
+   saveResearchIdentity(localStorage,scope,null,identity)
+  }
+  await session.select(scope);if(!valid())return
+  if(session.identity?.threadId!==survey.sourceThreadId||session.identity.projectId!==survey.projectId)throw Error('原研究绑定不一致，未交付。')
+  const id='survey-handoff:'+snapshot.id
+  let record=(await researchCloud.get<ResearchHandoff>('artifact',id))?.data
+  if(!valid())return
+  const persist=async()=>{if(!valid())throw Error('账号或批次已变化');record!.updatedAt=new Date().toISOString();await researchCloud.save('artifact',id,record);if(valid())handoffs.value[snapshot.id]={...record!}}
+  const check=async()=>{
+   const transcript=await fetchSessionTranscript(agent,survey.sourceThreadId);if(!valid())return
+   const proof=handoffProof(transcript.messages.map(m=>({role:m.role,text:m.content.filter(b=>b.type==='text').map(b=>b.text||'').join('')})),snapshot.id)
+   if(proof.sent){record!.state=proof.replyObserved?'reply-observed':'sent';record!.error='';await persist()}
+   message.value=handoffStatus(record)
+  }
+  if(record){
+   if(record.taskId!==scope.taskId||record.threadId!==survey.sourceThreadId||record.projectId!==survey.projectId||record.contentHash!==snapshot.contentHash||record.surveyId!==survey.id)throw Error('历史交付绑定不一致，已阻止重复交付。')
+   if(record.state==='uploading'){
+    const attachments=await listAttachments(agent,survey.sourceThreadId,controller?.signal);if(!valid())return
+    const csv=attachments.filter(f=>f.fileName==='snapshot-'+snapshot.id+'.csv'),manifest=attachments.filter(f=>f.fileName==='snapshot-'+snapshot.id+'-manifest.json')
+    if(csv.length!==1||manifest.length!==1)throw Error('附件上传结果不完整或存在重名，未自动重传；请核对原会话附件。')
+    const csvResponse=await fetchResearchWordFile(agent,survey.sourceThreadId,csv[0]!.ref.replace(/^@/,''),controller?.signal)
+    if(!csvResponse.ok)throw Error('已上传CSV无法读取核验，未重传或发送。')
+    const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await csvResponse.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('')
+    const manifestResponse=await fetchResearchWordFile(agent,survey.sourceThreadId,manifest[0]!.ref.replace(/^@/,''),controller?.signal)
+    if(!manifestResponse.ok)throw Error('已上传清单无法读取核验，未重传或发送。')
+    const data=await manifestResponse.json();if(!valid())return
+    if(digest!==snapshot.contentHash||data.id!==snapshot.id||data.projectId!==survey.projectId||data.surveyId!==survey.id||data.contentHash!==snapshot.contentHash||data.version!==survey.version)throw Error('上传附件与快照不一致，已阻止继续。')
+    record.csvRef=csv[0]!.ref;record.manifestRef=manifest[0]!.ref;record.state='attachments-ready';record.error='';await persist()
+    message.value='附件已逐项核验并登记。再次点击可继续交付，不会重复上传。';return
+   }
+   if(['dispatching','sent','reply-observed'].includes(record.state)){await check();if(valid())message.value=handoffStatus(record)+'；本次仅核对，没有重发。';return}
+  }else{
+   const transcript=await fetchSessionTranscript(agent,survey.sourceThreadId);if(!valid())return
+   const priorProof=handoffProof(transcript.messages.map(m=>({role:m.role,text:m.content.filter(b=>b.type==='text').map(b=>b.text||'').join('')})),snapshot.id)
+   record={taskId:scope.taskId,threadId:survey.sourceThreadId,projectId:survey.projectId,agentId:agent,surveyId:survey.id,snapshotId:snapshot.id,version:survey.version,batchName:survey.batchName,batchKind:survey.batchKind,contentHash:snapshot.contentHash,rowCount:snapshot.rowCount,operationId:crypto.randomUUID(),state:priorProof.replyObserved?'reply-observed':priorProof.sent?'sent':'preparing',updatedAt:new Date().toISOString()}
+   await researchCloud.create('artifact',id,record);if(!valid())return;handoffs.value[snapshot.id]={...record}
+   if(priorProof.sent){message.value=handoffStatus(record)+'；已补登记历史交付，没有重复发送。';return}
+  }
+  try{
+   if(session.busy||session.halted||session.interrupts.length||['running','working','interrupt','uncertain'].includes(session.status))throw Error('原会话仍有运行或待核对事项，请先在研究页面处理；未发送快照消息。')
+   if(record.state==='preparing'){
+    const csv=await collectionApi.snapshotBytes(snapshot.id);if(!valid())return
+    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',csv)),b=>b.toString(16).padStart(2,'0')).join('')
+    if(hash!==snapshot.contentHash)throw Error('快照内容校验失败，未上传。')
+    record.state='uploading';await persist();if(!valid())return
     const file=await uploadAttachment(agent,survey.sourceThreadId,new File([csv],'snapshot-'+snapshot.id+'.csv',{type:'text/csv'}),controller?.signal)
-    if(generation!==epoch)return
+    if(!valid())return
+    record.csvRef=file.ref;await persist();if(!valid())return
     const manifest=await uploadAttachment(agent,survey.sourceThreadId,new File([JSON.stringify({projectId:survey.projectId,version:survey.version,batchName:survey.batchName,batchKind:survey.batchKind,...snapshot},null,2)],'snapshot-'+snapshot.id+'-manifest.json',{type:'application/json'}),controller?.signal)
-    if(generation!==epoch)return
-    message.value='快照附件已保存，正在向原研究发送登记请求…'
-    const before=session.messages.length
-    await session.start('已人工确认采用数据快照 '+snapshot.id+'。版本 '+survey.version+'，批次 '+survey.batchName+'（'+survey.batchKind+'），共 '+snapshot.rowCount+' 份。请读取并核对材料完整性，统计执行等待另行确认。\n'+file.ref+'\n'+manifest.ref,{requireModelProbe:false,allowIdleMessage:true})
-    if(generation!==epoch)return
-    if(session.messages.length<=before)throw Error(session.error || '附件已保存到原会话，但消息尚未发送，请回原研究核对。')
-    message.value='快照已发起交付，请回原研究核对 G3 回复。'
-    await router.push({name:'research-replay',query:{task:survey.sourceTaskId}})
-  })
+    if(!valid())return
+    record.manifestRef=manifest.ref;record.state='attachments-ready';await persist()
+   }
+   if(!valid()||!record.csvRef||!record.manifestRef)throw Error('附件上传未完整确认，消息未发送。')
+   record.state='dispatching';record.error='';await persist();if(!valid())return
+   await session.start('已人工确认采用数据快照 '+snapshot.id+'。版本 '+survey.version+'，批次 '+survey.batchName+'（'+survey.batchKind+'），共 '+snapshot.rowCount+' 份。请读取并核对材料完整性，统计执行等待另行确认。\n'+record.csvRef+'\n'+record.manifestRef,{requireModelProbe:false,allowIdleMessage:true})
+   if(!valid())return
+   await check()
+   if(valid()&&session.error){record.error=session.error;await persist()}
+  }catch(e){if(valid()){record.error=e instanceof Error?e.message:'交付中断';await persist()}throw e}
+ })
 }
 onBeforeUnmount(()=>{reset()})
 </script>

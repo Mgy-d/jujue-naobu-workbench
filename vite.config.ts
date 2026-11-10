@@ -14,7 +14,39 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const backendTarget = env.VITE_BACKEND_TARGET || 'http://localhost:8080'
 
+  const tjdcTarget=process.env.VITE_BACKEND_TARGET_TJDC || env.VITE_BACKEND_TARGET_TJDC || ''
+  const businessAuthTarget = process.env.VITE_BUSINESS_AUTH_TARGET || env.VITE_BUSINESS_AUTH_TARGET || backendTarget
+  const readOnlyCases = (process.env.VITE_CASE_CATALOG_MODE || env.VITE_CASE_CATALOG_MODE) === 'smyy-readonly'
+  const readOnlyCaseTarget = process.env.VITE_READONLY_CASE_TARGET || env.VITE_READONLY_CASE_TARGET || 'http://192.168.1.245:8081'
+  const stripCaseCredentials: import('vite').ProxyOptions['configure'] = proxy => {
+    proxy.on('proxyReq', request => {for (const header of ['authorization', 'x-oauth-token', 'cookie']) request.removeHeader(header)})
+  }
+  const readOnlyGuard: import('vite').Connect.NextHandleFunction = (req, res, next) => {
+    const path = (req.url || '').split('?')[0]
+    const catalog = path === '/case-catalog-api' || path.startsWith('/case-catalog-api/')
+    const files = path === '/case-files' || path.startsWith('/case-files/')
+    if (!catalog && !files) return next()
+    const publicRoute = files || /^\/case-catalog-api\/cases(?:\/[^/]+)?$/.test(path) || path === '/case-catalog-api/case-dicts'
+    if (!publicRoute || !['GET', 'HEAD'].includes(req.method || 'GET')) {
+      res.statusCode = 405
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(JSON.stringify({code:'READ_ONLY_CASE_CATALOG', message:'数模案例仅供只读展示，不支持写入或管理操作'}))
+      return
+    }
+    next()
+  }
+  const readOnlyPlugin: Plugin = {name:'readonly-math-case-catalog',
+    configureServer(server) {server.middlewares.use(readOnlyGuard)},
+    configurePreviewServer(server) {server.middlewares.use(readOnlyGuard)},
+  }
   const proxyOptions = {
+    ...(readOnlyCases ? {'/case-catalog-api': {target:readOnlyCaseTarget,changeOrigin:true,
+      rewrite:(path:string)=>path.replace(/^\/case-catalog-api/, '/api/smyy'),configure:stripCaseCredentials}} : {}),
+    ...(tjdcTarget ? {
+      '/business-auth': {target:businessAuthTarget,changeOrigin:true,rewrite:(path: string)=>path.replace(/^\/business-auth/, '/api/auth')},
+      '/api/tjdc': {target:tjdcTarget,changeOrigin:true},
+    } : {}),
+    '/case-files': {target:readOnlyCases ? readOnlyCaseTarget : tjdcTarget || backendTarget,changeOrigin:true,...(readOnlyCases ? {configure:stripCaseCredentials} : {})},
     '/collection-api': { target: env.VITE_COLLECTION_TARGET || 'http://127.0.0.1:8090', changeOrigin: true, rewrite: (path: string) => path.replace(/^\/collection-api/, '/api') },
     '/sandbox-api': { target: 'http://127.0.0.1:8766', changeOrigin: true },
     '/api': { target: backendTarget, changeOrigin: true },
@@ -62,7 +94,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [vue(), ...(env.VITE_RESEARCH_BUSINESS_MODE === 'mock' ? [businessMockPlugin] : [])],
+    plugins: [vue(), ...(readOnlyCases ? [readOnlyPlugin] : []), ...(env.VITE_RESEARCH_BUSINESS_MODE === 'mock' ? [businessMockPlugin] : [])],
     base: './',
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },

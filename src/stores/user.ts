@@ -257,17 +257,14 @@ export const useUserStore = defineStore('user', () => {
 
   /** 退出登录：real 模式通知后端并清 token，mock 模式仅清本地账号 */
   async function logout(): Promise<void> {
-    if (AUTH_MODE === 'real') {
-      const logoutStart=authSnapshot()
-      await authApi.logout()
-      if(!sameAuth(logoutStart))return
-      clearTokens()
-      token.value = ''
-    }
+    // authApi 在发出登出请求后同步清两侧凭据；界面同样立即退出。
+    const pending = AUTH_MODE === 'real' ? authApi.logout() : Promise.resolve()
+    token.value = ''
     user.value = null
     localStorage.removeItem(USER_KEY)
-    // 退出后允许重新恢复会话（否则下次 ensureRestored 会拿到旧的已 resolve 的 Promise）
     restorePromise = null
+    // 等待之后不再写用户状态，防止清掉这期间的新登录。
+    await pending
   }
 
   /** 忘记密码：手机号/邮箱 + 验证码重置（未登录态，real） */

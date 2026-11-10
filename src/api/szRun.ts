@@ -10,7 +10,7 @@ export function successfulResearchHitlIds(messages: unknown[]): Set<string> {
     const msg=object(raw);if(!msg || !Array.isArray(msg.content))continue
     for(const rawBlock of msg.content){
       const b=object(rawBlock);if(!b || typeof b.id!=='string' || !b.id)continue
-      if(b.type==='tool_call')calls.set(b.id,{count:(calls.get(b.id)?.count||0)+1,index,hitl:msg.role==='assistant' && (b.name==='ui_gate'||b.name==='ui_form_advanced')})
+      if(b.type==='tool_call')calls.set(b.id,{count:(calls.get(b.id)?.count||0)+1,index,hitl:msg.role==='assistant' && (b.name==='ui_gate'||b.name==='ui_form_advanced'||b.name==='plan_exit')})
       if(b.type==='tool_result')results.set(b.id,{count:(results.get(b.id)?.count||0)+1,index,success:b.state==='success' && !JSON.stringify(b.output??'').includes('[HITL_TIMEOUT]')})
     }
   }
@@ -61,8 +61,15 @@ function number(value: unknown): number | undefined { return typeof value === 'n
 export function normalizeResearchInterrupt(interrupt: AguiInterrupt): ResearchForm {
   const id = interruptId(interrupt)
   const toolName = String(interrupt.metadata?.toolName || '')
-  if (!id || !['ui_form_advanced', 'ui_gate'].includes(toolName)) throw new Error('中断身份或表单类型不支持，不能安全提交。')
+  if (!id || !['ui_form_advanced', 'ui_gate', 'plan_exit'].includes(toolName)) throw new Error('中断身份或表单类型不支持，不能安全提交。')
   const input = object(interrupt.metadata?.toolInput ?? interrupt.metadata?.toolContent) || {}
+  if(toolName==='plan_exit'){
+    if(typeof input.summary!=='string' || !input.summary.trim() || Object.keys(input).some(key=>key!=='summary'))throw Error('执行计划内容不完整或包含不支持的参数，不能批准。')
+    return {interruptId:id,toolName,title:'执行计划确认',message:input.summary,fields:[{
+      key:'decision',label:'是否允许智能体执行上方计划（不代表研究阶段审核通过）',kind:'radio-group',
+      options:['同意按此计划执行','不同意执行'],required:true,placeholder:'',pageTitle:'',
+    }]}
+  }
   const existing = gateFromInterrupts([interrupt])
   if (!existing) throw new Error('表单字段不完整，不能安全提交。')
   let fields: ResearchField[] = []
@@ -121,6 +128,11 @@ export function makeResearchResume(interrupts: AguiInterrupt[], answers: Record<
     const clean: Record<string, unknown> = {}
     for (const field of form.fields) { const value = values[field.key]; validateField(field, value); if (value !== undefined) clean[field.key] = value }
     if (form.toolName === 'ui_gate' && !['通过', '不通过'].includes(String(clean.decision))) throw new Error('审核结论只能选择通过或不通过。')
+    if(form.toolName==='plan_exit'){
+      const approved=clean.decision==='同意按此计划执行'
+      const input=object(item.metadata?.toolInput ?? item.metadata?.toolContent)!
+      return {interruptId:form.interruptId,status:'resolved',payload:approved?{approved:true,editedArgs:input}:{approved:false}}
+    }
     const payload: Record<string, unknown> = { output: JSON.stringify(clean) }
     if (form.toolName === 'ui_gate') { payload.decision = clean.decision; payload.feedback = clean.feedback ?? '' }
     return { interruptId:form.interruptId, status:'resolved', payload }
@@ -137,17 +149,28 @@ export function buildResearchRequest(identity: ResearchIdentity, text: string, i
 export class ResearchRunTracker {
   status: ResearchRunStatus = 'running'; message = ''; texts: Record<string,string> = {}; interrupts: AguiInterrupt[] = []
   private started = false
+  private planTools = new Map<string,string>()
   constructor(readonly threadId: string, readonly runId: string) {}
   accept(event: AguiEvent): void {
     if (this.status !== 'running') return
     if (typeof event.threadId === 'string' && event.threadId !== this.threadId || typeof event.runId === 'string' && event.runId !== this.runId) { this.status='error';this.message='事件的会话或运行身份不匹配。';return }
     if(event.type==='RUN_STARTED' && event.threadId===this.threadId && event.runId===this.runId)this.started=true
+    if(event.type==='TOOL_CALL_START' && event.toolCallName==='plan_exit' && typeof event.toolCallId==='string')this.planTools.set(event.toolCallId,'')
+    if(event.type==='TOOL_CALL_ARGS' && typeof event.toolCallId==='string' && typeof event.delta==='string' && this.planTools.has(event.toolCallId)){
+      const args=this.planTools.get(event.toolCallId)!+event.delta
+      if(args.length>2000000){this.status='error';this.message='执行计划参数超出核对范围。';return}
+      this.planTools.set(event.toolCallId,args)
+    }
     const error = runEventError(event)
     if (error) { this.status='error';this.message=error;return }
     if (event.type === 'TEXT_MESSAGE_CONTENT' && typeof event.delta === 'string') { const id = typeof event.messageId === 'string' ? event.messageId : 'assistant';this.texts[id]=(this.texts[id] || '')+event.delta }
     if (event.type !== 'RUN_FINISHED') return
     const outcome = object(event.outcome), kind = outcome?.type
-    if (kind === 'interrupt') { this.interrupts=extractInterrupts(event);this.status=this.interrupts.length?'interrupt':'uncertain';if (!this.interrupts.length)this.message='服务提示需要确认，但未返回完整中断身份。' }
+    if (kind === 'interrupt') { this.interrupts=extractInterrupts(event).map(item=>{
+      const toolId=item.toolCallId || interruptId(item).split(':').slice(1).join(':')
+      if(!this.planTools.has(toolId) || item.metadata?.toolName && item.metadata.toolName!=='plan_exit')return item
+      return {...item,toolCallId:toolId,metadata:{...item.metadata,toolName:'plan_exit',toolInput:item.metadata?.toolInput ?? object(this.planTools.get(toolId)) ?? {}}}
+    });this.status=this.interrupts.length?'interrupt':'uncertain';if (!this.interrupts.length)this.message='服务提示需要确认，但未返回完整中断身份。' }
     else if (kind === 'success' || event.outcome == null && this.started && event.threadId===this.threadId && event.runId===this.runId) this.status='success'
     else { this.status='uncertain';this.message='结束事件没有明确成功状态，请核对会话。' }
   }
@@ -180,11 +203,17 @@ export function reconcileResearchPending(items: AguiInterrupt[], resolved: Set<s
 }
 
 
+/** Compare parsed tool inputs, preserving array order and all parameter values. */
+export function sameResearchToolInput(left:unknown,right:unknown):boolean {
+ const a=object(left),b=object(right);if(!a||!b)return false
+ const stable=(v:unknown):string=>JSON.stringify(v&&typeof v==='object'?Array.isArray(v)?v.map(item=>JSON.parse(stable(item))):Object.fromEntries(Object.entries(v).sort(([x],[y])=>x.localeCompare(y)).map(([k,item])=>[k,JSON.parse(stable(item))])):v)
+ return stable(a)===stable(b)
+}
 /** Background recorders omit interrupt outcome; match the complete tool call to the live registry. */
 export function matchingBackgroundRuns(records:Array<{runId?:string;payload:AguiEvent}>,threadId:string,pending:AguiInterrupt[]):Set<string> {
   const runs=new Map<string,{started:boolean;finished:boolean;bad:boolean;tools:Map<string,{name:string;args:string}>}>()
   for(const {runId:run,payload:e} of records){
-    if(!run?.startsWith('srv-'))continue
+    if(typeof run!=='string'||!run.trim())continue
     let state=runs.get(run)
     if(!state){state={started:false,finished:false,bad:false,tools:new Map()};runs.set(run,state)}
     if(e.threadId!==threadId || e.runId!==run){state.bad=true;continue}
@@ -203,4 +232,36 @@ export function matchingBackgroundRuns(records:Array<{runId?:string;payload:Agui
     if(pending.every(item=>{const tool=state.tools.get(String(item.toolCallId||interruptId(item).split(':').slice(1).join(':'))),input=object(item.metadata?.toolInput);if(!tool||!input||!['ui_gate','ui_form_advanced'].includes(tool.name)||tool.name!==item.metadata?.toolName)return false;const args=object(tool.args);return !!args && stable(args)===stable(input)}))matches.add(run)
   }
   return matches
+}
+
+
+/** Recover an existing plan confirmation, never invent an interrupt ID or approve it. */
+export function recoverResearchPlan(messages:unknown[],events:Array<{runId?:string;payload:AguiEvent}>,threadId:string):{runId:string;interrupts:AguiInterrupt[]}|null {
+  const asking:Record<string,unknown>[]=[],results=new Set<string>()
+  for(const raw of messages){
+    const message=object(raw);if(!message || !Array.isArray(message.content))continue
+    for(const value of message.content){
+      const block=object(value);if(!block)continue
+      if(block.type==='tool_result' && typeof block.id==='string')results.add(block.id)
+      if(message.role==='assistant' && block.type==='tool_call' && block.state==='asking')asking.push(block)
+    }
+  }
+  if(asking.length!==1 || asking[0]!.name!=='plan_exit')return null
+  const call=asking[0]!,input=object(call.input)
+  if(typeof call.id!=='string' || results.has(call.id) || !input || typeof input.summary!=='string' || !input.summary.trim() || Object.keys(input).some(key=>key!=='summary'))return null
+  const candidates=new Map<string,{runId:string;interrupts:AguiInterrupt[]}>()
+  for(const record of events){
+    const event=record.payload,run=record.runId
+    if(!run || event.type!=='RUN_FINISHED' || event.threadId!==threadId || event.runId!==undefined && event.runId!==run || object(event.outcome)?.type!=='interrupt')continue
+    const items=extractInterrupts(event)
+    if(items.length!==1)continue
+    const item=items[0]!,id=interruptId(item),toolId=item.toolCallId || id.split(':').slice(1).join(':')
+    if(!id || toolId!==call.id || item.metadata?.toolName && item.metadata.toolName!=='plan_exit')continue
+    const recordedInput=item.metadata?.toolInput ?? item.metadata?.toolContent
+    if(recordedInput!==undefined && JSON.stringify(object(recordedInput))!==JSON.stringify(input))continue
+    const interrupt:AguiInterrupt={...item,toolCallId:call.id,metadata:{...item.metadata,toolName:'plan_exit',toolInput:input,runId:run,recoveredPlan:true}}
+    normalizeResearchInterrupt(interrupt)
+    candidates.set(run+'\u0000'+id,{runId:run,interrupts:[interrupt]})
+  }
+  return candidates.size===1?[...candidates.values()][0]!:null
 }

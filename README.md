@@ -6,7 +6,7 @@
 
 ## 本地启动
 
-使用 Node.js 20+ 与 pnpm，按 `pnpm-lock.yaml` 安装依赖：
+使用 Node.js 24 LTS（本轮验证为 24.12.0）与 pnpm，按 `pnpm-lock.yaml` 安装依赖。新增 PDF 预览依赖要求 Node.js >=22.13.0 或 >=24，旧的 Node.js 20 不再满足该依赖的构建要求：
 
 ```sh
 pnpm install --frozen-lockfile

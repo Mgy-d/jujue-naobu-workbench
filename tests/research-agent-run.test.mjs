@@ -29,3 +29,37 @@ test('chat choice matches explicit option text and preserves original interrupt 
   const g=m.normalizeResearchInterrupt(gate)
   assert.equal(m.researchChoiceAnswer([g],'不通过').value,'不通过')
 })
+
+const planning={id:'reply-plan:call-plan',toolCallId:'call-plan',metadata:{toolName:'plan_exit',toolInput:{summary:'仅整理G1三份材料，之后等待人工审核；不执行统计。'}}}
+test('plan_exit displays its full plan and resumes only an explicit human decision using the native approval payload',async()=>{
+ const m=await subject(),form=m.normalizeResearchInterrupt(planning)
+ assert.match(form.title,/计划/);assert.equal(form.message,planning.metadata.toolInput.summary)
+ assert.throws(()=>m.makeResearchResume([planning],{}),/全部/)
+ const yes=m.makeResearchResume([planning],{[planning.id]:{decision:'同意按此计划执行'}})
+ assert.deepEqual(yes[0].payload,{approved:true,editedArgs:planning.metadata.toolInput})
+ const no=m.makeResearchResume([planning],{[planning.id]:{decision:'不同意执行'}})
+ assert.deepEqual(no[0].payload,{approved:false});assert.equal(no[0].status,'resolved')
+ assert.throws(()=>m.makeResearchResume([planning],{[planning.id]:{decision:'继续下一步'}}),/选项/)
+})
+test('a missing registry plan is reconstructed only from an exact asking tool and unambiguous same-session interrupt event',async()=>{
+ const m=await subject(),messages=[{id:'reply-plan',role:'assistant',content:[{type:'tool_call',id:'call-plan',name:'plan_exit',state:'asking',input:JSON.stringify(planning.metadata.toolInput)}]}]
+ const event={runId:'plan-run',payload:{type:'RUN_FINISHED',threadId:'plan-thread',runId:'plan-run',outcome:{type:'interrupt',interrupts:[planning]}}}
+ const proof=m.recoverResearchPlan(messages,[event],'plan-thread')
+ assert.equal(proof.runId,'plan-run');assert.equal(proof.interrupts[0].id,planning.id)
+ assert.equal(m.recoverResearchPlan(messages,[{...event,payload:{...event.payload,threadId:'other'}}],'plan-thread'),null)
+ assert.equal(m.recoverResearchPlan([...messages,{role:'assistant',content:[{type:'tool_result',id:'call-plan',state:'success'}]}],[event],'plan-thread'),null)
+ const changed=structuredClone(event);changed.payload.outcome.interrupts[0].metadata.toolInput.summary='不同计划'
+ assert.equal(m.recoverResearchPlan(messages,[changed],'plan-thread'),null)
+ const sibling=structuredClone(messages);sibling[0].content.push({type:'tool_call',id:'another',name:'execute',state:'asking',input:'{}'})
+ assert.equal(m.recoverResearchPlan(sibling,[event],'plan-thread'),null)
+})
+
+test('native plan interrupts without metadata keep their real identity and obtain plan content from the same stream tool call',async()=>{
+ const m=await subject(),tracker=new m.ResearchRunTracker('plan-thread','plan-run')
+ tracker.accept({type:'RUN_STARTED',threadId:'plan-thread',runId:'plan-run'})
+ tracker.accept({type:'TOOL_CALL_START',threadId:'plan-thread',runId:'plan-run',toolCallId:'call-plan',toolCallName:'plan_exit'})
+ tracker.accept({type:'TOOL_CALL_ARGS',threadId:'plan-thread',runId:'plan-run',toolCallId:'call-plan',delta:JSON.stringify(planning.metadata.toolInput)})
+ tracker.accept({type:'RUN_FINISHED',threadId:'plan-thread',runId:'plan-run',outcome:{type:'interrupt',interrupts:[{id:planning.id,toolCallId:'call-plan'}]}})
+ const result=tracker.finish();assert.equal(result.status,'interrupt');assert.equal(result.interrupts[0].id,planning.id)
+ assert.equal(m.normalizeResearchInterrupt(result.interrupts[0]).message,planning.metadata.toolInput.summary)
+})

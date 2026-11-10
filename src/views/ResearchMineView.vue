@@ -28,6 +28,7 @@
       <div v-if="researchStore.cloudOwner" class="cloud-storage-status" role="status">
         <span>{{researchStore.cloudStatus==='ready'?'公司数据库已同步':researchStore.cloudStatus==='saving'?'正在保存到公司数据库…':researchStore.cloudStatus==='loading'?'正在读取公司数据库…':researchStore.cloudError}}</span>
         <button v-if="researchStore.cloudStatus==='error'" class="btn-open" @click="researchStore.retryCloud()">重试同步</button>
+        <details v-if="researchStore.historySyncIssues.length"><summary>有 {{researchStore.historySyncIssues.length}} 条旧记录待补全</summary><ul><li v-for="issue in researchStore.historySyncIssues" :key="issue">{{issue}}</li></ul><button class="btn-open" @click="researchStore.syncLocalHistory()">重新核对旧记录</button></details>
         <button v-if="researchStore.legacyTaskCount" class="btn-open" @click="importOldTasks">导入本机旧任务（{{researchStore.legacyTaskCount}}）</button>
       </div>
       <section class="section" aria-labelledby="mine-tasks-title">

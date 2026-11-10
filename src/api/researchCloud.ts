@@ -57,6 +57,13 @@ export class ResearchCloudDocuments {
     this.queue.set(key,pending)
     return pending
   }
+  async create<T>(kind:ResearchDocumentKind,id:string,data:T):Promise<ResearchDocument<T>>{
+    const owner=this.owner
+    if(!owner||owner!==researchCloudOwner())throw Error('当前保存账号不一致')
+    const row=await request<ResearchDocument<T>>('/documents/'+kind+'/'+encodeURIComponent(id),'PUT',{expectedRevision:0,data})
+    if(owner!==this.owner)throw Error('账号已变化')
+    this.remember(kind,id,row.revision);return row
+  }
   async remove(kind:ResearchDocumentKind,id:string){
     const owner=this.owner,key=this.key(kind,id)
     await this.queue.get(key)?.catch(()=>undefined)
@@ -74,4 +81,56 @@ export async function archiveResearchFile(taskId:string,fileName:string,sourcePa
   for(let offset=0;offset<view.length;offset+=8192)binary+=String.fromCharCode(...view.subarray(offset,offset+8192))
   const contentBase64=btoa(binary)
   return request<{id:string;contentHash:string}>('/files/'+crypto.randomUUID(),'PUT',{taskId,fileName,sourcePath,contentBase64})
+}
+
+export interface ArchivedResearchFile {id:string;taskId:string;fileName:string;sourcePath:string;contentHash:string;size:number;createdAt:string}
+export function listResearchFiles(taskId:string){return request<ArchivedResearchFile[]>('/files?'+new URLSearchParams({taskId}))}
+export async function readResearchFile(id:string):Promise<ArrayBuffer>{
+ const auth=authSnapshot();const response=await rawFetch('/collection-api/research/files/'+encodeURIComponent(id),{method:'GET',timeoutMs:30000})
+ if(!sameAuth(auth))throw Error('账号已变化，未采用附件内容。')
+ if(!response.ok)throw Error('数据库附件读取失败（HTTP '+response.status+'）')
+ return response.arrayBuffer()
+}
+
+/** Import only records with a validated current-owner binding; never overwrite server history. */
+export async function syncOwnedLocalRecords(owner:string,storage:Storage):Promise<string[]>{
+ const {loadResearchIdentity}=await import('@/utils/researchRunIdentity');const failures:string[]=[]
+ const valid=()=>owner===researchCloudOwner()&&owner===researchCloud.owner
+ for(const key of Object.keys(storage)){
+  if(!key.startsWith('shidiaoyanzhen.agent-run.v1:'+encodeURIComponent(owner)+':'))continue
+  if(!valid())throw Error('账号已变化，历史同步已停止。')
+  try{
+   const value=JSON.parse(storage.getItem(key)||'null');const scope={ownerId:owner,agentId:value?.agentId,taskId:value?.taskId}
+   const identity=loadResearchIdentity(storage,scope).identity
+   if(!identity || identity.ownerId!==owner)continue
+   let task=await researchCloud.get('task',identity.taskId)
+   if(!task){
+    const {TASK_STORAGE_KEY,cleanTask}=await import('@/utils/researchDrafts')
+    let localTask:ReturnType<typeof cleanTask>=null
+    for(const registryKey of [TASK_STORAGE_KEY+':'+encodeURIComponent(owner),TASK_STORAGE_KEY]){
+     try{const registry=JSON.parse(storage.getItem(registryKey)||'null');const candidate=cleanTask(registry?.tasks?.[identity.taskId]);if(candidate?.localTaskId===identity.taskId){localTask=candidate;break}}catch{}
+    }
+    if(!localTask){failures.push(identity.taskId+'：未找到可核实的本机任务草稿；历史记录保留，未自动创建任务');continue}
+    if(!valid())throw Error('账号已变化')
+    // The identity was validated for this exact owner/task; expectedRevision=0 prevents overwrites.
+    try{task=await researchCloud.create('task',identity.taskId,localTask)}catch(error){if(error instanceof ResearchCloudError&&error.status===409)task=await researchCloud.get('task',identity.taskId);else throw error}
+    if(!task)throw Error('任务补传未确认，未导入关联记录')
+   }
+   if(!valid())throw Error('账号已变化')
+   const raw=storage.getItem('shidiaoyanzhen.record.v1:'+owner+':'+identity.agentId+':'+identity.taskId)
+   if(!raw)continue
+   const record=JSON.parse(raw)
+   if(record?.version!==1||!Array.isArray(record.messages)||!Array.isArray(record.files)||!Array.isArray(record.gaps))throw Error('本机成果格式不完整')
+   if(!await researchCloud.get('record',identity.taskId)){
+    if(!valid())throw Error('账号已变化')
+    await researchCloud.save('record',identity.taskId,{taskId:identity.taskId,record})
+   }
+   const sessionId=identity.taskId+':'+identity.agentId
+   if(!await researchCloud.get('session',sessionId)){
+    if(!valid())throw Error('账号已变化')
+    await researchCloud.save('session',sessionId,{taskId:identity.taskId,identity,phase:record.phase,capturedAt:record.savedAt,messages:record.messages,source:'local-saved-record'})
+   }
+  }catch(error){if(!valid())throw error;failures.push(key+'：'+(error instanceof Error?error.message:'同步失败'))}
+ }
+ return failures
 }

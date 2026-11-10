@@ -116,3 +116,71 @@ test('recognized progress ledger stays in status data instead of repeating its r
   assert.ok(renderResearchMessage('```text\n'+line+'\n```','assistant').includes('[进度]'))
   assert.ok(renderResearchMessage(line,'user').includes('[进度]'))
 })
+
+
+const publicBody=html=>html.split('<details class="message-technical">')[0]
+test('known internal drafting markers are folded while AI authorship and human work remain visible',()=>{
+ const text='团队选择：由 AI 起草正文，能写的都写。按 Never 16，需要同时满足接口约定：`draftedBy=AI` + `status=drafted`、骨架加 `<!-- aiDrafted -->`、AI 记录写 `purpose=正文起草`。\n\nS1 标题页、S3 目录、S12 参考文献保持 `pending`，因为署名、页码或文献不能编造。'
+ const html=renderResearchMessage(text,'assistant'),body=publicBody(html)
+ assert.match(body,/由 AI 起草正文/);assert.match(body,/待补充/);assert.match(body,/不能编造/)
+ for(const code of ['Never 16','draftedBy','status=drafted','purpose=','&lt;!--'])assert.ok(!body.includes(code),code)
+ assert.ok(!html.includes('技术详情'));assert.ok(!html.includes('Never 16'));assert.ok(!html.includes('draftedBy=AI'))
+})
+test('format checking never becomes research approval or statistical completion',()=>{
+ const html=renderResearchMessage('`validate_report` 现在返回 `ok=true`：13 节中 10 节 drafted（全部 aiDrafted）、3 节 pending。\n\n`pendingBlocksWithText=0`、`conclusionHits=0`。\n\n统计尚未执行，必须由团队确认后才能运行。','assistant'),body=publicBody(html)
+ assert.match(body,/报告格式检查通过/);assert.match(body,/10 节 初稿/);assert.match(body,/3 节 待补充/)
+ assert.match(body,/统计尚未执行/);assert.match(body,/团队确认/);assert.ok(!body.includes('pendingBlocksWithText'));assert.ok(!body.includes('conclusionHits'))
+ assert.ok(!body.includes('审核通过'));assert.ok(!html.includes('pendingBlocksWithText=0'))
+})
+test('failures, prohibitions and mixed decision requests cannot disappear into technical details',()=>{
+ const text='按 Never 16，需要接口约定，但本次校验失败，不能提交。\n\n`validate_report` 返回 `ok=false`，等待团队确认。'
+ const body=publicBody(renderResearchMessage(text,'assistant'));assert.match(body,/校验失败/);assert.match(body,/不能提交/);assert.match(body,/格式检查未通过/);assert.match(body,/等待团队确认/)
+})
+test('file references, links, tables and code examples retain exact text during display adaptation',()=>{
+ const text='状态 `pending`。文件 `数据/pending.json` 和 drafted.md 保留。[链接](https://example.com/status=pending)\n\n```text\nstatus=drafted\n\nconclusionHits=0\n```\n\n| 字段 | 值 |\n|---|---|\n| status | pending |'
+ const html=renderResearchMessage(text,'assistant'),body=publicBody(html)
+ assert.match(body,/数据\/pending.json/);assert.match(body,/drafted.md/);assert.match(body,/href="https:\/\/example.com\/status=pending"/)
+ assert.match(body,/status=drafted\n\nconclusionHits=0/);assert.match(body,/<td>pending<\/td>/)
+})
+test('technical original remains escaped and does not reintroduce hidden reasoning',()=>{
+ const html=renderResearchMessage('<think>private reasoning</think>\n\n`validate_report` 返回 `ok=false`。\n\n<script>alert(1)</script>','assistant')
+ assert.ok(!html.includes('private reasoning'));assert.ok(!html.includes('<script>'));assert.match(html,/&lt;script&gt;/)
+})
+
+
+test('technical counters or rules mixed with user decisions stay in the visible reply',()=>{
+ for(const text of ['`pendingBlocksWithText=0`，请核对原始数据。','按 Never 16，需要满足接口约定，本次审核尚未通过。','按 Never 16，需要接口约定，正文由 AI 起草。']){
+  const body=publicBody(renderResearchMessage(text,'assistant'))
+  assert.ok(body.includes('请核对原始数据')||body.includes('审核尚未通过')||body.includes('正文由 AI 起草'))
+ }
+})
+
+
+test('long emphasized prose retains its Markdown boundaries when improving paragraphs',()=>{
+ const text='**'+('这是需要团队核对的说明。'.repeat(20))+'**'
+ const html=renderResearchMessage(text,'assistant');assert.equal((html.match(/<strong>/g)||[]).length,1);assert.ok(!html.includes('**'))
+})
+
+
+test('platform completion reminder shows only useful ledger work, not orchestration commands',()=>{
+ const text='[异步任务完成通知] 收到以下来自后台子智能体的完成事件，请据此继续推进流程：\n\n[declarative-ending] [停滞自检] 第 3 次催办：本轮立即调用工具。\n\n（平台自动提醒，照做即可；不要把这条提醒原样复述到回复里。）\n\n[平台台账]\n下一步：完善后只读停等；等团队改写定稿正文、补 S1/S3/S12、给图与题库答案（无待办动作可代做，不自行启动）\n不要重新推导计划；先完成「下一步」这一个动作；台账里的结果直接采信。'
+ for(const role of ['user','assistant']){
+  const html=renderResearchMessage(text,role)
+  assert.match(html,/待处理事项/);assert.match(html,/标题页、目录和参考文献/);assert.match(html,/不自行启动/)
+  for(const value of ['declarative-ending','催办','立即调用工具','平台台账','S1/','直接采信'])assert.ok(!html.includes(value),value)
+ }
+ assert.match(renderResearchMessage('我看到提醒：[异步任务完成通知] 收到以下来自后台子智能体的完成事件，请解释。','user'),/异步任务完成通知/)
+})
+
+test('platform failures remain visible even when normal orchestration text is hidden',()=>{
+ const html=renderResearchMessage('[异步任务完成通知] 收到以下来自后台子智能体的完成事件，请据此继续：\n\n审核超时，统计尚未执行，等待人工确认。\n\n[平台台账]\n下一步：请核对原审核结果。','user')
+ for(const value of ['审核超时','统计尚未执行','等待人工确认','请核对原审核结果'])assert.ok(html.includes(value),value)
+})
+
+test('ordinary prose keeps compact paragraphs and explains only known section names',()=>{
+ const body=publicBody(renderResearchMessage('补 S1、S3、S12 后再走闸门。S10 的内容等待团队核对。'+ '这是正文说明。'.repeat(30),'assistant'))
+ assert.match(body,/标题页、目录、参考文献/);assert.match(body,/审核确认/);assert.match(body,/S10/)
+ assert.equal((body.match(/<p>/g)||[]).length,1)
+ const code=publicBody(renderResearchMessage('代码 `S1` 与路径 `S3/file.md` 保留。','assistant'))
+ assert.match(code,/<code>S1<\/code>/);assert.match(code,/S3\/file.md/)
+})

@@ -14,9 +14,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aiden0z/pptx-renderer": "1.4.0",
     "@element-plus/icons-vue": "^2.3.1",
+    "dompurify": "^3.4.17",
     "element-plus": "^2.8.0",
+    "mammoth": "^1.13.0",
     "markdown-it": "^14.3.1",
+    "pdfjs-dist": "6.5.438",
     "pinia": "^2.2.0",
     "vue": "^3.4.38",
     "vue-router": "^4.4.3"
