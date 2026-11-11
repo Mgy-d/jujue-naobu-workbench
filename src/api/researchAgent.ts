@@ -36,20 +36,23 @@ export interface ResearchSessionStatus {
   /** Authoritative parent/background idle plus external COMPLETED; not research approval. */
   completedRun?:boolean
   manualAttention?:boolean
+  /** Server explicitly closed the expired review and permits a new ordinary instruction. */
+  expiredReviewClosed?:boolean
   awaitingInput?:boolean
   nextStage?:string
 }
 
 /** Keep old-platform idle parents distinct from completed research, without changing math-model behavior. */
 export async function fetchResearchRunStatus(agentId:string,threadId:string):Promise<ResearchSessionStatus> {
-  const state=await fetchSessionRunStatus(agentId,threadId) as {sessionId?:string;running?:unknown;pendingWork?:unknown;backgroundBusy?:unknown;externalState?:{state?:unknown}}
+  const state=await fetchSessionRunStatus(agentId,threadId) as {sessionId?:string;running?:unknown;pendingWork?:unknown;backgroundBusy?:unknown;externalState?:{state?:unknown;detail?:unknown}}
   if(!state || typeof state.running!=='boolean')throw new Error('服务端运行状态不完整，请恢复会话核对。')
   if(state.sessionId!==undefined && state.sessionId!==threadId)throw new Error('运行状态的会话身份不匹配。')
   if(state.backgroundBusy===true)return {running:state.running,pendingWork:true}
   // Explicit watchdog handoff overrides a stale CONTINUE ledger, never active work.
   if(state.sessionId===threadId && !state.running && state.backgroundBusy===false
       && state.pendingWork!==true && state.externalState?.state==='NEEDS_ATTENTION'){
-    return {running:false,pendingWork:false,manualAttention:true}
+    const closed=typeof state.externalState.detail==='string' && /^审批已超时取消[，,；;]\s*请重新发起或直接补充指令[。.]?$/.test(state.externalState.detail.trim())
+    return {running:false,pendingWork:false,manualAttention:true,...(closed?{expiredReviewClosed:true}:{})}
   }
   if(state.sessionId===threadId && !state.running && state.backgroundBusy===false && state.pendingWork!==true
       && state.externalState?.state==='COMPLETED')return {running:false,pendingWork:false,completedRun:true}

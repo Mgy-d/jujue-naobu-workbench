@@ -1,7 +1,7 @@
 <template>
-<section class="decision-form" :aria-labelledby="inputId('title')">
- <header><h4 :id="inputId('title')">{{presentation.title}}</h4><p v-if="presentation.description">{{presentation.description}}</p></header>
- <div v-for="field in form.fields" :key="field.key" class="decision-field">
+<section class="decision-form" :aria-labelledby="hideHeader?undefined:inputId('title')" :aria-label="hideHeader?presentation.title:undefined">
+ <header v-if="!hideHeader"><h4 :id="inputId('title')">{{presentation.title}}</h4><p v-if="presentation.description">{{presentation.description}}</p></header>
+ <div v-for="field in form.fields" :key="field.key" class="decision-field" :data-field-key="field.key">
   <label :id="inputId(field.key)+'-label'" :for="['radio-group','checkbox-group'].includes(field.kind)?undefined:inputId(field.key)">{{presentation.label(field)}}<strong v-if="field.required">必填</strong></label>
   <div v-if="field.kind==='radio-group'||field.kind==='checkbox-group'" class="decision-choices" :role="field.kind==='radio-group'?'radiogroup':'group'" :aria-labelledby="inputId(field.key)+'-label'" :aria-required="field.required">
    <label v-for="option in field.options" :key="option" class="decision-option" :class="{selected:checked(field,option),disabled:busy}">
@@ -10,18 +10,19 @@
    </label>
   </div>
   <textarea v-else-if="field.kind==='textarea'" :id="inputId(field.key)" :disabled="busy" :value="String(value(field)??'')" :placeholder="presentation.placeholder(field)" :minlength="field.minLength" :maxlength="field.maxLength" @input="emit('field',field,$event)" />
-  <select v-else-if="field.kind==='select'" :id="inputId(field.key)" :disabled="busy" :value="String(value(field)??'')" @change="emit('field',field,$event)"><option value="">请选择</option><option v-for="option in field.options" :key="option" :value="option">{{option}}</option></select>
-  <template v-else-if="field.kind==='other-text'"><input :id="inputId(field.key)" :list="inputId(field.key)+'-options'" :disabled="busy" :value="String(value(field)??'')" :placeholder="field.placeholder||'选择或填写其他内容'" @input="emit('field',field,$event)" /><datalist :id="inputId(field.key)+'-options'"><option v-for="option in field.options" :key="option" :value="option" /></datalist></template>
-  <input v-else :id="inputId(field.key)" :type="field.kind==='number'?'number':'text'" :disabled="busy" :value="String(value(field)??'')" :placeholder="field.placeholder" :min="field.min" :max="field.max" :step="field.step" :minlength="field.minLength" :maxlength="field.maxLength" @input="emit('field',field,$event)" />
+  <select v-else-if="field.kind==='select'" :id="inputId(field.key)" :disabled="busy" :value="String(value(field)??'')" @change="emit('field',field,$event)"><option value="">请选择</option><option v-for="option in field.options" :key="option" :value="option">{{presentation.option(field,option).title}}</option></select>
+  <template v-else-if="field.kind==='other-text'"><input :id="inputId(field.key)" :list="inputId(field.key)+'-options'" :disabled="busy" :value="String(value(field)??'')" :placeholder="presentation.placeholder(field)||'选择或填写其他内容'" @input="emit('field',field,$event)" /><datalist :id="inputId(field.key)+'-options'"><option v-for="option in field.options" :key="option" :value="option" /></datalist></template>
+  <input v-else :id="inputId(field.key)" :type="field.kind==='number'?'number':'text'" :disabled="busy" :value="String(value(field)??'')" :placeholder="presentation.placeholder(field)" :min="field.min" :max="field.max" :step="field.step" :minlength="field.minLength" :maxlength="field.maxLength" @input="emit('field',field,$event)" />
  </div>
- <details v-if="presentation.known" class="decision-original"><summary>查看相关记录</summary><p>{{form.title}}</p><p v-for="field in form.fields" :key="field.key">{{field.label}}<span v-for="option in field.options" :key="option">{{option}}</span></p></details>
+ <details v-if="presentation.known" class="decision-original"><summary>查看相关记录</summary><p>{{readableResearchText(form.title)}}</p><p v-for="field in form.fields" :key="field.key">{{readableResearchText(field.label)}}<span v-for="option in field.options" :key="option">{{readableResearchText(option)}}</span></p></details>
 </section>
 </template>
 <script setup lang="ts">
 import {computed} from 'vue'
+import {readableResearchText} from '@/utils/researchDisplayText'
 import type {ResearchForm,ResearchField} from '@/api/szRun'
 import {researchFormPresentation} from '@/utils/researchFormPresentation'
-const props=defineProps<{form:ResearchForm;answers?:Record<string,unknown>;busy?:boolean}>()
+const props=defineProps<{form:ResearchForm;answers?:Record<string,unknown>;busy?:boolean;hideHeader?:boolean}>()
 const emit=defineEmits<{field:[field:ResearchField,event:Event];choice:[field:ResearchField,option:string]}>()
 const presentation=computed(()=>researchFormPresentation(props.form))
 const inputId=(key:string)=>'decision-'+encodeURIComponent(props.form.interruptId)+'-'+encodeURIComponent(key)

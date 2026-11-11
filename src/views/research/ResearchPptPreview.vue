@@ -14,7 +14,7 @@ import {authSnapshot,sameAuth,AUTH_CHANGE_EVENT} from '@/api/http'
 import {readArtifactDownload} from '@/api/researchArtifactDownload'
 import {checkBinaryPreview} from '@/utils/researchBinaryPreview'
 import type {PptxViewer} from '@aiden0z/pptx-renderer'
-const props=defineProps<{agentId:string;threadId:string;path:string}>()
+const props=defineProps<{agentId:string;threadId:string;path:string;readFile?:(signal:AbortSignal)=>Promise<Blob>}>()
 const stage=ref<HTMLElement|null>(null),loading=ref(false),rendering=ref(false),error=ref(''),partial=ref(false),page=ref(1),total=ref(0),downloadUrl=ref('')
 let generation=0,controller:AbortController|undefined,viewer:PptxViewer|undefined
 function clear(){generation++;controller?.abort();viewer?.destroy();viewer=undefined;stage.value?.replaceChildren();loading.value=false;rendering.value=false;total.value=0;partial.value=false;if(downloadUrl.value)URL.revokeObjectURL(downloadUrl.value);downloadUrl.value=''}
@@ -22,7 +22,7 @@ async function load(){
  clear();const token=generation,auth=authSnapshot();controller=new AbortController();loading.value=true;error.value='';page.value=1
  const valid=()=>token===generation&&sameAuth(auth)
  try{
-  const blob=await readArtifactDownload(props.agentId,props.threadId,props.path,controller.signal);if(!valid())return
+  const blob=(props.readFile?await props.readFile(controller.signal):await readArtifactDownload(props.agentId,props.threadId,props.path,controller.signal));if(!valid())return
   const bytes=new Uint8Array(await blob.arrayBuffer());if(!valid())return
   checkBinaryPreview(bytes,'pptx');downloadUrl.value=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'}))
   const {PptxViewer,RECOMMENDED_ZIP_LIMITS}=await import('@aiden0z/pptx-renderer');await nextTick();if(!valid()||!stage.value)return

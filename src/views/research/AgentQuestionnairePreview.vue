@@ -1,13 +1,13 @@
 <template>
 <section class="agent-questionnaire" aria-label="智能体问卷预览">
-  <p class="source">当前研究会话文件 · {{model?.version || '读取格式中'}} · 待人工核对</p>
-  <small>{{path}}</small>
+  <p class="source">{{historical?'已保存的问卷':'当前研究会话文件'}} · {{model?.version || '读取格式中'}} · {{historical?'保存版本':'待人工核对'}}</p>
+  <small v-if="!historical">{{path}}</small>
   <p v-if="error" role="alert">{{error}}</p>
   <template v-if="model">
     <h3>{{model.title}}</h3>
     <p>共 {{model.questions.length+model.unsupported.length}} 题</p>
     <div class="actions"><button type="button" @click="mode='read'">查看问卷</button><button type="button" :disabled="!model.canFill" @click="mode='fill'">试填预览</button><button type="button" @click="mode='raw'">文件原文</button></div>
-    <div class="publish-panel">
+    <div v-if="!historical" class="publish-panel">
       <button type="button" :disabled="!model.canFill || publishing" @click="publishOpen=!publishOpen">发布问卷</button>
       <RouterLink to="/research/surveys">问卷与答卷管理 →</RouterLink>
       <form v-if="publishOpen" @submit.prevent="publish">
@@ -42,7 +42,7 @@ import {collectionApi,type CollectionSurvey} from '@/api/researchCollection'
 import {useRouter} from 'vue-router'
 import QuestionnaireFillPreview from './QuestionnaireFillPreview.vue'
 import {readAgentQuestionnaire} from '@/utils/researchAgentQuestionnaire'
-const props=defineProps<{content:string;projectId:string;threadId:string;path:string;taskId?:string}>()
+const props=defineProps<{historical?:boolean;content:string;projectId:string;threadId:string;path:string;taskId?:string}>()
 const mode=ref('read'),router=useRouter()
 const publishOpen=ref(false),publishing=ref(false),publishError=ref(''),batchKind=ref<'synthetic'|'real'>('synthetic'),batchName=ref('合成验收批次'),notice=ref('本批次用于合成软件验收。请使用虚构资料填写，答卷仅用于验证发布、收集和读取流程。')
 const batchDefaults={
@@ -57,7 +57,7 @@ const published=ref<CollectionSurvey|null>(null)
 const fillLink=computed(()=>published.value?location.origin+router.resolve('/survey/'+published.value.code).href:'')
 let publishCode='',publishSignature='',publishEpoch=0
 async function publish(){
-  if(publishing.value || !model.value?.canFill)return
+  if(props.historical || publishing.value || !model.value?.canFill)return
   if(batchKind.value==='real' && notice.value===batchDefaults.real.notice){publishError.value='请先填写本次真实调查的用途和知情说明。';return}
   const epoch=publishEpoch
   const payload={title:model.value.title,version:model.value.version,schema:JSON.parse(props.content),projectId:props.projectId,batchKind:batchKind.value,batchName:batchName.value.trim(),notice:notice.value.trim(),sourceThreadId:props.threadId,sourcePath:props.path,sourceTaskId:props.taskId,requireInvite:false}

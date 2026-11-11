@@ -1,17 +1,17 @@
 <template>
 <section class="session-receipt" :class="'receipt-'+presentation.tone" aria-label="当前会话状态">
-  <header class="receipt-head"><h3>{{presentation.title}}</h3><span v-if="displayPhase" class="receipt-phase"><b>{{displayPhase}}</b><span v-if="phaseName">{{phaseName}}</span></span></header>
+  <header class="receipt-head"><h3>{{readablePhases(presentation.title)}}</h3><span v-if="displayPhase" class="receipt-phase"><span>{{phaseName||readablePhases(displayPhase)}}</span></span></header>
   <div class="receipt-body">
-    <p v-if="responseTimedOut" class="receipt-error" role="alert">本次回复超时，已执行的修改与最终结果尚待核对。请先核对原会话和已保存文件，不要重复提交。</p><p v-if="error && !providerError" class="receipt-error" role="alert">{{error}}</p>
+    <p v-if="responseTimedOut" class="receipt-error" role="alert">本次回复超时，已执行的修改与最终结果尚待核对。请先核对原会话和已保存文件，不要重复提交。</p><p v-if="error && !providerError" class="receipt-error" role="alert">{{readablePhases(error)}}</p>
     <p v-if="timedOut" class="receipt-error" role="alert">服务端报告本次审核已超时关闭，请先核对会话中的审核状态。</p>
-    <p v-if="notice && !isReadNotice && !responseTimedOut" class="receipt-notice">{{notice}}</p>
+    <p v-if="notice && !isReadNotice && !responseTimedOut" class="receipt-notice">{{readablePhases(notice)}}</p>
     <dl v-if="progress || checkedAt" class="receipt-facts">
-      <div v-if="progress"><dt>{{responseTimedOut?'上次记录状态':'记录状态'}}</dt><dd>{{progress.state}}</dd></div>
-      <div v-if="progress"><dt>{{responseTimedOut?'上次记录的工作':'进行中'}}</dt><dd>{{progress.currentWork}}</dd></div>
+      <div v-if="progress"><dt>{{responseTimedOut?'上次记录状态':'记录状态'}}</dt><dd>{{readablePhases(progress.state)}}</dd></div>
+      <div v-if="progress"><dt>{{responseTimedOut?'上次记录的工作':'进行中'}}</dt><dd>{{readablePhases(progress.currentWork)}}</dd></div>
       <div v-if="checkedTime" class="receipt-checked"><dt>最近核对</dt><dd>{{checkedTime}}</dd></div>
     </dl>
-    <div v-if="progress?.nextStep" class="receipt-next"><span>{{responseTimedOut?'超时前记录的下一步（尚未重新确认）':'下一步'}}</span><p>{{progress.nextStep}}</p></div>
-    <p v-if="backgroundNotice && !responseTimedOut" class="receipt-background">{{backgroundNotice}}</p>
+    <div v-if="progress?.nextStep" class="receipt-next"><span>{{responseTimedOut?'超时前记录的下一步（尚未重新确认）':'下一步'}}</span><p>{{readablePhases(progress.nextStep)}}</p></div>
+    <p v-if="backgroundNotice && !responseTimedOut" class="receipt-background">{{readablePhases(backgroundNotice)}}</p>
     <div v-if="hasDiagnostic || hasQuestionnaire || presentation.canCompose || canRecover || halted || (timedOut && !halted)" class="receipt-actions">
       <button v-if="hasDiagnostic" type="button" class="receipt-button" @click="emit('diagnostic')">导出核对信息</button>
       <button v-if="hasQuestionnaire" type="button" class="receipt-button primary" :disabled="busy" @click="emit('questionnaire')">查看当前会话问卷</button>
@@ -26,6 +26,7 @@
 </template>
 <script setup lang="ts">
 import {computed} from 'vue'
+import {readablePhases} from '@/utils/researchMessageRender'
 import {researchResponseTimeout} from '@/utils/researchResponseDisplay'
 import {conversationReceiptState} from '@/utils/researchConversationUi'
 import type {ResearchProgressHint} from '@/utils/researchProgress'

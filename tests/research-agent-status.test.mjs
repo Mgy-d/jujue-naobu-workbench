@@ -129,3 +129,25 @@ test('exact COMPLETED parent and idle background permit conversation checks inde
   await scenario({sessionId:'thread',running:false,backgroundBusy:false,externalState:{state:'COMPLETED'},...change},{sessionId:'thread',nextAction:'DONE'},async(run)=>assert.notEqual((await run()).completedRun,true))
  }
 })
+
+
+test('explicit company expired-approval handoff permits ordinary messages only when same-session parent and background are idle',async()=>{
+ const base={sessionId:'thread',running:false,backgroundBusy:false,externalState:{state:'NEEDS_ATTENTION',detail:'审批已超时取消，请重新发起或直接补充指令'}}
+ await scenario(base,{},async(run,calls)=>{assert.deepEqual(await run(),{running:false,pendingWork:false,manualAttention:true,expiredReviewClosed:true});assert.equal(calls.length,1)})
+ for(const detail of ['审批未取消，请等待','审批已超时取消','其他任务失败','未确认审批已超时取消，请重新发起或直接补充指令'])await scenario({...base,externalState:{state:'NEEDS_ATTENTION',detail}},{},async(run)=>assert.equal((await run()).expiredReviewClosed,undefined))
+ for(const change of [{running:true},{backgroundBusy:true},{backgroundBusy:undefined},{pendingWork:true}])await scenario({...base,...change},{nextAction:'UNKNOWN'},async(run)=>assert.equal((await run()).expiredReviewClosed,undefined))
+ await scenario({...base,sessionId:'other'},{},async(run)=>assert.rejects(run,/身份/))
+})
+
+
+test('G3 data delivery and collection wordings expose material entry without authorizing statistics',async()=>{
+  const bundle=await build({entryPoints:[fileURLToPath(new URL('../src/utils/researchProgress.ts',import.meta.url))],bundle:true,platform:'node',format:'esm',write:false})
+  const {readResearchProgress,researchG3Action}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'))
+  for(const next of ['等团队交付原始数据 csv','等待平台回收答卷','等待团队提供分析计划','等待团队提交原始数据与分析计划']){
+    const report=readResearchProgress('[进度] 阶段=G3 完成=G1、G2 进行中=无 剩余=数据质检与统计 下步='+next+' 状态=已阻塞')
+    assert.equal(report.awaitingInput,true)
+    assert.equal(researchG3Action(report).kind,'materials')
+    assert.match(researchG3Action(report).message,/暂不执行统计/)
+  }
+  assert.equal(researchG3Action({phase:'G3',currentWork:'数据清洗中',nextStep:'等待平台回收答卷',state:'执行中'}).kind,'unknown')
+})

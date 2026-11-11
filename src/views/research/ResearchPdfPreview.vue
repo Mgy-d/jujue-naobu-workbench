@@ -17,7 +17,7 @@ import {authSnapshot,sameAuth,AUTH_CHANGE_EVENT} from '@/api/http'
 import {readArtifactDownload} from '@/api/researchArtifactDownload'
 import {checkBinaryPreview,pdfPreviewMetrics} from '@/utils/researchBinaryPreview'
 import type {PDFDocumentProxy,PDFDocumentLoadingTask,RenderTask} from 'pdfjs-dist'
-const props=defineProps<{agentId:string;threadId:string;path:string}>()
+const props=defineProps<{agentId:string;threadId:string;path:string;readFile?:(signal:AbortSignal)=>Promise<Blob>}>()
 const document=shallowRef<PDFDocumentProxy|null>(null),canvas=ref<HTMLCanvasElement|null>(null)
 const loading=ref(false),rendering=ref(false),error=ref(''),page=ref(1),total=ref(0),zoom=ref(1),downloadUrl=ref('')
 let generation=0,controller:AbortController|undefined,task:PDFDocumentLoadingTask|undefined,render:RenderTask|undefined
@@ -26,7 +26,7 @@ async function load(){
  clear();const token=generation,auth=authSnapshot();controller=new AbortController();loading.value=true;error.value='';page.value=1;zoom.value=1
  const valid=()=>token===generation&&sameAuth(auth)
  try{
-  const blob=await readArtifactDownload(props.agentId,props.threadId,props.path,controller.signal)
+  const blob=(props.readFile?await props.readFile(controller.signal):await readArtifactDownload(props.agentId,props.threadId,props.path,controller.signal))
   if(!valid())return
   const bytes=new Uint8Array(await blob.arrayBuffer());if(!valid())return
   checkBinaryPreview(bytes,'pdf');downloadUrl.value=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}))

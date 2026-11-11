@@ -798,3 +798,174 @@ test('COMPLETED current idle state permits a normal message despite incomplete u
   await s.start('补充文献，暂不执行统计',{requireModelProbe:false,allowIdleMessage:true});assert.equal(sends,1,mode);assert.equal(request.resume,undefined,mode)
  }
 })
+
+
+test('manual attention ignores incomplete ordinary historical tools and clears stale errors before ordinary same-session send',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+ await s.select(scope);await s.start('研究',{requireModelProbe:false});const thread=s.identity.threadId
+ d.runStatus=async()=>({running:false,pendingWork:false,manualAttention:true});d.live=async()=>null
+ d.transcript=async()=>({messages:[{role:'assistant',content:[{type:'tool_call',id:'old-read',name:'read_file',state:'running'},{type:'tool_call',id:'old-stat',name:'execute',state:'running'},{type:'tool_result',id:'old-stat',state:'success'},{type:'tool_result',id:'old-stat',state:'success'},{type:'text',text:'请提供文献。'}]}]})
+ s.status='uncertain';s.error='人工接续前仍需核对';let sends=0,writes=0,request
+ d.register=d.remove=async()=>{writes++};d.run=async(identity,input)=>{sends++;request=input;assert.equal(identity.threadId,thread);return {status:'success',message:'',texts:{a:'收到'},interrupts:[]}}
+ await s.recover({readOnly:true});assert.equal(s.status,'awaiting');assert.equal(s.error,'');assert.equal(sends,0)
+ // The send preflight must accept a fresh authoritative idle handoff even when the live registry is unavailable.
+ s.status='uncertain';await s.start('补充参考文献，暂不执行统计。',{requireModelProbe:false,allowIdleMessage:true})
+ assert.equal(sends,1);assert.equal(request.resume,undefined);assert.equal(writes,0);assert.equal(s.error,'')
+})
+
+test('manual attention still blocks an unresolved current form and submitted audit timeout despite old ordinary tools',async()=>{
+ for(const mode of ['asking-form','submitted-timeout','failed-status','late-task']){
+  const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+  await s.select(scope);await s.start('研究',{requireModelProbe:false})
+  d.runStatus=async()=>({running:false,pendingWork:false,manualAttention:true});d.live=async()=>null
+  const messages=[{role:'assistant',content:[{type:'tool_call',id:'old-read',name:'read_file',state:'running'}]}]
+  if(mode==='asking-form')messages.push({role:'assistant',content:[{type:'tool_call',id:'form',name:'ui_form_advanced',state:'asking'}]})
+  if(mode==='submitted-timeout'){s.identity.submittedIds=[gate.id];messages.push(...successfulGateMessages,{role:'assistant',content:[{type:'tool_result',id:'call1',state:'success',output:'[HITL_TIMEOUT]'}]})}
+  d.transcript=async()=>({messages});if(mode==='failed-status')d.runStatus=async()=>{throw Error('状态读取失败')}
+  let release;if(mode==='late-task')d.transcript=()=>new Promise(resolve=>release=resolve)
+  let sends=0;d.run=async()=>{sends++;throw Error('must not send')}
+  const action=s.start('补充文献',{requireModelProbe:false,allowIdleMessage:true})
+  if(mode==='late-task'){while(!release)await new Promise(resolve=>setTimeout(resolve,0));await s.select({...scope,taskId:'B'});release({messages})}
+  await action;assert.equal(sends,0,mode)
+ }
+})
+
+
+test('explicit cancelled-review handoff recovers the original conversation and sends new material once without replaying approval',async()=>{
+ const {s,d}=await completedConversationFixture(),thread=s.identity.threadId
+ d.runStatus=async()=>({running:false,pendingWork:false,manualAttention:true,expiredReviewClosed:true})
+ let sends=0,writes=0,request;d.register=d.remove=async()=>{writes++};d.run=async(identity,input)=>{sends++;request=input;assert.equal(identity.threadId,thread);return {status:'success',message:'',texts:{a:'合成：收到补充'},interrupts:[]}}
+ await s.recover({readOnly:true});assert.equal(s.status,'awaiting');assert.equal(s.error,'');assert.match(s.notice,/超时关闭/);assert.equal(sends,0)
+ await s.start('补充参考文献，暂不执行统计。',{requireModelProbe:false,allowIdleMessage:true})
+ assert.equal(sends,1);assert.equal(writes,0);assert.equal(request.resume,undefined);assert.match(JSON.stringify(request.messages),/补充参考文献/)
+})
+
+test('cancelled-review ordinary message still respects active work, current forms, submission conflicts and server unresolved rejection',async()=>{
+ for(const mode of ['running','background','pending','live','submitted','duplicate','server-rejection']){
+  const {s,d,messages}=await completedConversationFixture()
+  d.runStatus=async()=>({running:mode==='running',pendingWork:mode==='background',manualAttention:true,expiredReviewClosed:true})
+  if(mode==='pending')d.pending=async()=>[gate]
+  if(mode==='live')d.live=async()=>['call1']
+  if(mode==='submitted')s.identity.submittedIds=[gate.id]
+  if(mode==='duplicate')messages.push({role:'assistant',content:[{type:'tool_result',id:'call1',state:'success',output:'通过'}]})
+  if(mode==='server-rejection')s.identity.unresolvedInterrupts=true
+  let sends=0;d.run=async()=>{sends++;throw Error('must not send')}
+  await s.start('补充文献',{requireModelProbe:false,allowIdleMessage:true});assert.equal(sends,0,mode)
+ }
+})
+
+
+test('pending submission refresh reads current conversation and G3 input requirement without sending another request',async()=>{
+  const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+  d.run=async()=>({status:'interrupt',message:'',texts:{},interrupts:[gate]})
+  d.pending=async()=>[gate]
+  await s.select(scope);await s.start('研究',{requireModelProbe:false})
+  let finishRun
+  d.run=async()=>new Promise(resolve=>{finishRun=resolve})
+  const submitting=s.submit({'reply:call1':{decision:'通过',feedback:''}})
+  await new Promise(resolve=>setTimeout(resolve,0))
+  const line='[进度] 阶段=G3 完成=G1、G2 进行中=无 剩余=质检统计 下步=等团队交付原始数据 csv 状态=已阻塞'
+  d.transcript=async()=>({messages:[{id:'new-g3',role:'assistant',content:[{type:'text',text:'请上传原始答卷。'+line}]}]})
+  d.progress=async()=>({sessionId:s.identity.threadId,progressLine:line})
+  d.runStatus=async()=>({running:false,pendingWork:false})
+  await s.checkFormSubmission()
+  assert.ok(s.messages.some(message=>message.text.includes('请上传原始答卷')))
+  assert.equal(s.serverPhase,'G3');assert.equal(s.reportedProgress.awaitingInput,true)
+  assert.equal(s.busy,true);assert.deepEqual(s.interrupts,[gate])
+  d.pending=async()=>{throw Error('offline')}
+  await s.checkFormSubmission()
+  assert.equal(s.formSubmission.checkFailed,true)
+  assert.match(s.formSubmission.checkMessage,/部分同步失败/)
+  finishRun({status:'success',message:'',texts:{},interrupts:[]});await submitting
+})
+
+
+test('issued callback clears only the issued draft before a delayed reply; preflight rejection keeps input',async()=>{
+  const {ResearchRunSession}=await subject(),d=deps();let finish,issued=0,draft='原始数据说明'
+  d.run=()=>new Promise(resolve=>{finish=resolve})
+  const s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid');await s.select(scope)
+  const request=s.start(draft,{requireModelProbe:false,onIssued:()=>{issued++;draft=''}})
+  while(!finish)await new Promise(resolve=>setTimeout(resolve,0))
+  assert.equal(draft,'');assert.equal(issued,1);assert.equal(s.busy,true)
+  assert.equal(s.messages.filter(m=>m.role==='user').length,1)
+  draft='回复期间的新编辑';finish({status:'success',message:'',texts:{a:'收到数据'},interrupts:[]});await request
+  assert.equal(draft,'回复期间的新编辑')
+  d.verify=async()=>{throw Error('认证失败')};draft='不能丢失的输入'
+  await s.start(draft,{requireModelProbe:false,onIssued:()=>{issued++;draft=''}})
+  assert.equal(draft,'不能丢失的输入');assert.equal(issued,1)
+})
+
+test('submitted form appears once as a user bubble while response is still streaming; failed preflight adds nothing',async()=>{
+  const {ResearchRunSession}=await subject(),d=deps();let finish,issued=0
+  d.run=async()=>({status:'interrupt',message:'',texts:{},interrupts:[gate]})
+  const storage=fixture(),s=new ResearchRunSession(storage,d,()=> 'owner',()=> 'uuid');await s.select(scope)
+  await s.start('研究',{requireModelProbe:false})
+  d.pending=async()=>[gate]
+  d.run=()=>new Promise(resolve=>{finish=resolve})
+  const answer={decision:'通过',feedback:'只核对材料，不启动统计'}
+  const request=s.submit({[gate.id]:answer},()=>issued++)
+  while(!finish)await new Promise(resolve=>setTimeout(resolve,0))
+  assert.equal(issued,1)
+  const bubbles=s.messages.filter(m=>m.id.startsWith('form-answer:'))
+  assert.equal(bubbles.length,1);assert.match(bubbles[0].text,/通过/)
+  assert.match(bubbles[0].text,/只核对材料，不启动统计/)
+  const journal=[...storage.map.entries()].find(([key])=>key.startsWith('shidiaoyanzhen.replay-forms.v1:'))
+  assert.ok(journal);const saved=JSON.parse(journal[1]);assert.deepEqual(saved[0].answers,answer);assert.equal(saved[0].answerMessageId,bubbles[0].id)
+  await s.submit({[gate.id]:answer});assert.equal(s.messages.filter(m=>m.id.startsWith('form-answer:')).length,1)
+  finish({status:'success',message:'',texts:{a:'收到'},interrupts:[]});await request
+  s.status='interrupt';s.interrupts=[gate];d.pending=async()=>[]
+  await s.submit({[gate.id]:answer},()=>issued++)
+  assert.equal(issued,1);assert.equal(s.messages.filter(m=>m.id.startsWith('form-answer:')).length,1)
+})
+
+test('verified historical form proof survives refresh and a shorter transcript, but never clears a new form or a timeout conflict',async()=>{
+  const {ResearchRunSession}=await subject(),d=deps(),storage=fixture()
+  d.run=async()=>({status:'interrupt',message:'',texts:{},interrupts:[gate]})
+  const s=new ResearchRunSession(storage,d,()=> 'owner',()=> 'uuid');await s.select(scope)
+  await s.start('研究',{requireModelProbe:false})
+  d.transcript=async()=>({messages:successfulGateMessages});d.runStatus=async()=>({running:false,awaitingInput:true})
+  await s.recover({readOnly:true})
+  assert.equal(s.status,'awaiting');assert.deepEqual(s.identity.resolvedIds,[gate.id]);assert.deepEqual(s.identity.pendingIds,[])
+  // Simulate an older pending snapshot restored alongside already verified proof.
+  s.identity.pendingIds=[gate.id];s.identity.submittedIds=[gate.id]
+  const raw=JSON.stringify(s.identity);storage.setItem([...storage.map.keys()][0],raw)
+  d.transcript=async()=>({messages:[]})
+  const reloaded=new ResearchRunSession(storage,d,()=> 'owner',()=> 'uuid');await reloaded.select(scope)
+  await reloaded.recover({readOnly:true});assert.equal(reloaded.status,'awaiting')
+  const next={...gate,id:'reply:call2',toolCallId:'call2',metadata:{...gate.metadata,runId:reloaded.identity.runId}}
+  d.pending=async()=>[next];await reloaded.recover({readOnly:true})
+  assert.equal(reloaded.status,'interrupt');assert.equal(reloaded.interrupts[0].id,next.id)
+  d.pending=async()=>[]
+  d.transcript=async()=>({messages:[{id:'late',role:'assistant',content:[{type:'tool_result',id:'call1',state:'success',output:'[HITL_TIMEOUT]'}]}]})
+  await reloaded.recover({readOnly:true});assert.equal(reloaded.halted,true)
+})
+
+
+test('artifacts remain usable during conversation and failed refresh; late task reads cannot leak',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+ await s.select(scope);s.probePassed=true;await s.start('research')
+ const files=[{type:'file',name:'report.md',path:'artifacts/report.md'}]
+ d.tree=async()=>files;await s.refreshArtifacts()
+ s.busy=true
+ d.read=async(_a,_t,path)=>({path,content:'report'})
+ await s.previewArtifact(files[0].path)
+ assert.equal(s.preview.content,'report');assert.equal(s.busy,true)
+ d.tree=async()=>{throw Error('offline')};await s.refreshArtifacts()
+ assert.deepEqual(s.artifacts,files);assert.equal(s.preview.content,'report');assert.match(s.artifactError,/offline/);assert.equal(s.error,'');assert.equal(s.busy,true)
+ s.busy=false
+ let finishRead;d.read=()=>new Promise(resolve=>finishRead=resolve)
+ const read=s.previewArtifact(files[0].path)
+ await s.select({...scope,taskId:'B'})
+ finishRead({path:files[0].path,content:'old task'});await read
+ assert.equal(s.preview,null);assert.deepEqual(s.artifacts,[]);assert.equal(s.previewBusy,false)
+})
+
+test('new preview supersedes slower old preview without blocking conversation',async()=>{
+ const {ResearchRunSession}=await subject(),d=deps(),s=new ResearchRunSession(fixture(),d,()=> 'owner',()=> 'uuid')
+ await s.select(scope);s.probePassed=true;await s.start('research')
+ s.artifacts=['a.md','b.md'].map(path=>({type:'file',name:path,path}))
+ let finish;d.read=async(_a,_t,path)=>path==='a.md'?new Promise(resolve=>finish=resolve):{path,content:'new'}
+ const first=s.previewArtifact('a.md');await s.previewArtifact('b.md')
+ finish({path:'a.md',content:'old'});await first
+ assert.equal(s.preview.path,'b.md');assert.equal(s.previewBusy,false);assert.equal(s.busy,false)
+})

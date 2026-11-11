@@ -1,3 +1,4 @@
+import {readableResearchText} from './researchDisplayText'
 import type {ResearchForm,ResearchField} from '@/api/szRun'
 /** Exact semantic adapter only: submitted fields/options are never rewritten. */
 export function researchFormPresentation(form:ResearchForm){
@@ -6,7 +7,7 @@ export function researchFormPresentation(form:ResearchForm){
   &&/^保持现状：视为 \d{1,2}:\d{2} 前时点的审核留痕，不改动$/.test(decision.options[0]||'')
   &&decision.options[1]==='走 G4 修订：更新为已确定匿名，重跑校验与闸门'
   &&decision.options[2]==='先看现状，暂不决定'
- return {
+ const presentation={
   known,title:known?'确认报告的匿名说明':form.title||'请确认以下事项',
   description:known?'之前保存的检查记录仍写着“团队署名与成员信息待填写”，与你已经确认的匿名要求不一致。请选择处理方式。':form.message==='运行等待确认，请完成以下表单后继续'?'':form.message,
   label:(field:ResearchField)=>known&&field===decision?'你希望怎么处理？':known&&field.kind==='textarea'&&/^补充说明（可选，/.test(field.label)?'补充要求（选填）':field.label,
@@ -21,4 +22,5 @@ export function researchFormPresentation(form:ResearchForm){
    ][index]||{title:value,description:''}
   },
  }
+ return {...presentation,title:readableResearchText(presentation.title),description:readableResearchText(presentation.description||''),label:(field:ResearchField)=>readableResearchText(presentation.label(field)),placeholder:(field:ResearchField)=>readableResearchText(presentation.placeholder(field)||''),option:(field:ResearchField,value:string)=>{const option=presentation.option(field,value);return {title:readableResearchText(option.title),description:readableResearchText(option.description)}}}
 }

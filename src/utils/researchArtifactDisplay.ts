@@ -13,7 +13,38 @@ export function artifactPresentation(file:DisplayArtifact){
   return {title,subject,format:label}
 }
 
+/** Identify report deliveries without treating checks, inputs or scripts as report prose. */
+export function isReportDeliverable(file:DisplayArtifact){
+ const path=file.path.replace(/\\/g,'/'),ext=file.name.split('.').pop()?.toLowerCase()||''
+ if(/(?:^|\/)(?:_proof|_input|uploads|分析代码)(?:\/|$)/i.test(path))return false
+ if(/^(?:合规检查|审核报告|核验|校验|检查清单|提交前清单|README|模板|AI使用|AI整理)/i.test(file.name))return false
+ if(!['doc','docx','pdf','ppt','pptx','md','html'].includes(ext))return false
+ const reportName=/报告正文|研究报告|报告初稿|答辩|(?:^|[-_\s])(?:report|presentation|slides)(?:[-_.\s]|$)/i.test(file.name)
+ const delivery=/(?:^|\/)(?:交付|报告|reports?|deliverables?|delivery)(?:\/|$)/i.test(path)
+ return reportName||(delivery&&['doc','docx','pdf','ppt','pptx'].includes(ext))||['ppt','pptx'].includes(ext)
+}
+export function prioritizeArtifacts<T extends DisplayArtifact>(files:T[]):T[]{
+ const rank=(file:T)=>{if(!isReportDeliverable(file))return 10;const ext=file.name.split('.').pop()?.toLowerCase();return ext==='docx'||ext==='doc'?0:ext==='pdf'?1:ext==='pptx'||ext==='ppt'?2:3}
+ return [...files].sort((a,b)=>rank(a)-rank(b))
+}
+export interface ArtifactCard<T extends DisplayArtifact> {key:string;files:T[]}
+/** Group same-directory image formats; preserve different paths and versions as separate cards. */
+export function groupArtifactCards<T extends DisplayArtifact>(files:T[]):ArtifactCard<T>[]{
+ const cards=new Map<string,ArtifactCard<T>>(),seen=new Set<string>()
+ for(const file of files){
+  if(seen.has(file.path))continue;seen.add(file.path)
+  const path=file.path.replace(/\\/g,'/'),image=/\.(png|svg|webp|jpe?g|gif|bmp|avif)$/i.test(file.name)
+  const key=image?'image:'+path.replace(/\.[^/.]+$/,''):'file:'+path
+  const card=cards.get(key);if(card)card.files.push(file);else cards.set(key,{key,files:[file]})
+ }
+ return [...cards.values()]
+}
+export function selectedArtifactVariant<T extends DisplayArtifact>(card:ArtifactCard<T>,path?:string):T{
+ const selected=card.files.find(file=>file.path===path);if(selected)return selected
+ return card.files.find(file=>/\.png$/i.test(file.name))||card.files[0]!
+}
 export function isPrimaryResearchArtifact(file:DisplayArtifact){
+  if(isReportDeliverable(file))return true
   if(/(?:^|[/\\])(?:_proof|_state|_input|uploads|分析代码)(?:[/\\]|$)/i.test(file.path))return false
   if(/manifest|日志|留痕|核验|校验|交接|登记|AI使用|AI整理|指纹|原始|模板|数据字典|清洗后|统计结果|图表清单|图表规格/i.test(file.name))return false
   const ext=file.name.split('.').pop()?.toLowerCase()??''
@@ -25,11 +56,12 @@ export function isPrimaryResearchArtifact(file:DisplayArtifact){
 
 /** Keep ambiguous duplicates. Directory and time are provenance, not proof of adoption. */
 export function artifactSourceLabel(file:DisplayArtifact,files:DisplayArtifact[]){
-  if(files.filter(other=>other.name===file.name).length<2)return ''
+  const same=(other:DisplayArtifact)=>/\.(png|svg|webp|jpe?g|gif|bmp|avif)$/i.test(file.name)?other.name.replace(/\.[^.]+$/,'')===file.name.replace(/\.[^.]+$/,''):other.name===file.name
+  if(files.filter(same).length<2)return ''
   const parts=file.path.replace(/\\/g,'/').split('/').slice(0,-1)
   const project=parts.findIndex(part=>/^sz-/.test(part))
   const relative=parts.slice(project>=0?project+1:0).join(' / ')
-  const peers=files.filter(other=>other.name===file.name)
+  const peers=files.filter(same)
   const labels=peers.map(other=>{
     const dirs=other.path.replace(/\\/g,'/').split('/').slice(0,-1)
     const index=dirs.findIndex(part=>/^sz-/.test(part))

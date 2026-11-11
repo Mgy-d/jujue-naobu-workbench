@@ -29,7 +29,7 @@ test('code whitespace and user supplied literal text are preserved',()=>{
 test('tagged reasoning and observed malformed thinkingUser opening stay out of assistant bubbles',()=>{
   const raw='<thinkingUser says "继续下一步" — internal reasoning.</think>\n<thinking>More internal reasoning</think>\n请确认进入 G2。'
   const html=renderResearchMessage(raw,'assistant')
-  assert.ok(html.includes('请确认进入 G2'))
+  assert.ok(html.includes('请确认进入 问卷'))
   assert.equal(html.includes('internal reasoning'),false)
   assert.equal(html.includes('thinking'),false)
 })
@@ -110,7 +110,7 @@ test('recognized progress ledger stays in status data instead of repeating its r
   const line='[进度] 阶段=G3（已通过） 完成=G1、G2、G3全部闸门 进行中=无 剩余=G4骨架 下步=等待团队确认是否进入 G4 状态=等待人工'
   const html=renderResearchMessage('## 下一步\n\n请核对风险后确认是否进入 G4。\n\n'+line,'assistant')
   assert.ok(html.includes('<h2>下一步</h2>'))
-  assert.ok(html.includes('请核对风险后确认是否进入 G4'))
+  assert.ok(html.includes('请核对风险后确认是否进入 报告与答辩'))
   assert.equal(html.includes('[进度]'),false)
   assert.equal(renderResearchMessage(line,'assistant'),'')
   assert.ok(renderResearchMessage('```text\n'+line+'\n```','assistant').includes('[进度]'))
@@ -183,4 +183,35 @@ test('ordinary prose keeps compact paragraphs and explains only known section na
  assert.equal((body.match(/<p>/g)||[]).length,1)
  const code=publicBody(renderResearchMessage('代码 `S1` 与路径 `S3/file.md` 保留。','assistant'))
  assert.match(code,/<code>S1<\/code>/);assert.match(code,/S3\/file.md/)
+})
+
+
+test('conversation uses understandable phase names while preserving raw source and code/file references',()=>{
+  const raw='G1 阶段已确认，进入 G2；G3 等待数据，G4 需要补充文献。'
+  for(const role of ['assistant','user']){
+    const html=renderResearchMessage(raw,role)
+    assert.doesNotMatch(html,/G[1-4]/);for(const label of ['研究设计','问卷','数据分析','报告与答辩'])assert.match(html,new RegExp(label))
+  }
+  assert.match(raw,/G1/)
+  const paths=renderResearchMessage('请核对 `G4` 与 `报告/G4校验.md`，文件 G4-记录.md，链接 https://example.com/G3','assistant')
+  assert.match(paths,/<code>G4<\/code>/);assert.match(paths,/G4-记录.md/);assert.match(paths,/https:\/\/example.com\/G3/)
+})
+
+
+test('observed standalone platform stall reminder and internal ledger never become user-facing bubbles',()=>{
+ const notice='[停滞自检] 平台检测到上一轮以纯文本收尾，收尾主题：session-complete.json 需明确确认。\n若宣告下一步动作，请立即调用工具兑现。\n（平台自动提醒，照做即可；不要把这条提醒原样复述到回复里。）\n\n[平台台账]\n下一步：未登记\n已核验事实（30 分钟内有效，勿重复取证）：\nExit code: 0，工具结果和指纹\n不要重新推导…'
+ assert.equal(renderResearchMessage(notice,'user'),'');assert.equal(renderResearchMessage(notice,'assistant'),'')
+ assert.ok(renderResearchMessage('请解释下面这条提示：\n'+notice,'user').includes('请解释'))
+ assert.ok(renderResearchMessage('请确认是否采用本次报告；尚未启动统计。','assistant').includes('尚未启动统计'))
+})
+
+test('model empty-answer reminders never appear as human messages, while quoted explanations remain readable',()=>{
+ const notice='<system-reminder>Your previous reply had empty content - the full answer was written to the reasoning channel only. Reply again and write the final answer into the content channel.</system-reminder>'
+ for(const role of ['user','assistant']){
+  assert.equal(renderResearchMessage(notice,role),'')
+  assert.equal(renderResearchMessage(notice+'\n\n'+notice,role),'')
+  assert.ok(renderResearchMessage('为什么会出现这条提示？\n'+notice,role).includes('为什么'))
+  assert.ok(renderResearchMessage('```text\n'+notice+'\n```',role).includes('system-reminder'))
+  assert.ok(renderResearchMessage('<system-reminder>请确认是否采用本次结果。</system-reminder>',role).includes('请确认'))
+ }
 })

@@ -18,3 +18,14 @@ test('unknown options, changed meanings, unrelated forms and unrecognized fields
  }
  const form=fixture(),field={key:'other',kind:'text',label:'风险：数据仍缺失',options:[]};form.fields.push(field);assert.equal(researchFormPresentation(form).label(field),field.label)
 })
+
+
+test('plain form labels hide workflow jargon while submitted options stay exact',()=>{
+ const form={title:'G2 问卷闸门',message:'等待闸门决策',fields:[{key:'decision',kind:'select',label:'阀门通过后继续',placeholder:'填写 G2 闸门意见',options:['重新发起闸门','不通过：数据缺失']} ]}
+ const before=JSON.stringify(form),ui=researchFormPresentation(form)
+ for(const text of [ui.title,ui.description,ui.label(form.fields[0]),ui.placeholder(form.fields[0]),ui.option(form.fields[0],form.fields[0].options[0]).title])assert.doesNotMatch(text,/闸门|阀门|G[1-4]/)
+ assert.equal(ui.description,'等待你确认')
+ assert.equal(ui.option(form.fields[0],form.fields[0].options[0]).title,'重新提交确认')
+ assert.equal(ui.option(form.fields[0],form.fields[0].options[1]).title,'不通过：数据缺失')
+ assert.equal(JSON.stringify(form),before)
+})

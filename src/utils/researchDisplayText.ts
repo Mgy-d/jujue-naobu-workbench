@@ -1,0 +1,4 @@
+/** Presentation only. Leave file names, URLs, code and stored agent text intact. */
+export function readableResearchText(text:string):string {
+  return text.replace(/(`+)[^`\n]*?\1|https?:\/\/[^\s]+|[\w\u4e00-\u9fff./\\-]+\.(?:md|json|csv|py|docx|pdf|pptx)\b|\bG([1-4])\b(?:\s*阶段)?|(?:闸门|阀门)(?:超时关闭|通过|已通过)|等待(?:闸门|阀门)决策|重新发起(?:闸门|阀门)|(?:闸门|阀门)/g,(match,_ticks,phase:string,offset:number)=>{if(!phase)return ({'闸门超时关闭':'本次确认已超时，请重新发起','阀门超时关闭':'本次确认已超时，请重新发起','闸门通过':'已确认，可以继续','阀门通过':'已确认，可以继续','闸门已通过':'已确认，可以继续','阀门已通过':'已确认，可以继续','等待闸门决策':'等待你确认','等待阀门决策':'等待你确认','重新发起闸门':'重新提交确认','重新发起阀门':'重新提交确认','闸门':'确认','阀门':'确认'} as Record<string,string>)[match]??match;const label={'1':'研究设计','2':'问卷','3':'数据分析','4':'报告与答辩'}[phase]!;return text.slice(offset+match.length).trimStart().startsWith(label)?'':label})
+}

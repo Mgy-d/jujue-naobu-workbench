@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {createRequire} from 'node:module'
 const require=createRequire(import.meta.url),{build}=require(require.resolve('esbuild',{paths:[require.resolve('vite')]}))
 const result=await build({entryPoints:['src/utils/researchArtifactDisplay.ts'],bundle:true,platform:'node',format:'esm',write:false})
-const {artifactPresentation,isPrimaryResearchArtifact,artifactSourceLabel}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'))
+const {artifactPresentation,isPrimaryResearchArtifact,artifactSourceLabel,isReportDeliverable,prioritizeArtifacts,groupArtifactCards,selectedArtifactVariant}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'))
 const file=(name,dir='报告')=>({name,path:'artifacts/sz-test/'+dir+'/'+name})
 test('primary list retains usable deliveries and hides intermediate data without altering source',()=>{
  const names=['答辩题库.json','社区团购平台用户复购行为调研-报告正文.docx','社区团购平台用户复购行为调研-报告正文.pdf','社区团购平台用户复购行为调研-答辩PPT.pptx','图表清单.json','数据字典.json','清洗后数据.csv','统计报告.md','统计结果.json','问卷结构.json','研究简报.md','研究问题.md','调查方案.md']
@@ -32,4 +32,28 @@ test('same-name artifacts stay separate and never select a final version by size
  const nested=[file('统计报告.md','数据'),{name:'统计报告.md',path:'sub-x/artifacts/sz-test/数据/统计报告.md'}]
  assert.notEqual(artifactSourceLabel(nested[0],nested),artifactSourceLabel(nested[1],nested))
  assert.equal(artifactSourceLabel(file('调查方案.md'),[file('调查方案.md')]),'')
+})
+
+
+test('main report formats and named report prose are primary even below a state directory',()=>{
+ for(const name of ['项目-报告正文.docx','项目-报告正文.pdf','项目-答辩PPT.pptx','项目-报告正文.md','report.docx','slides.pptx'])assert.equal(isPrimaryResearchArtifact(file(name,'_state/交付')),true,name)
+ for(const name of ['合规检查.md','审核报告.md','README-交付说明.md','研究问题.md'])assert.equal(isReportDeliverable(file(name,'_state/交付')),false,name)
+ assert.equal(isPrimaryResearchArtifact(file('报告正文.docx','_input')),false)
+ assert.equal(isPrimaryResearchArtifact(file('报告正文.docx','_proof')),false)
+})
+test('report Word PDF and PPT come before pictures without choosing a latest or approved version',()=>{
+ const files=[file('FIG1.png','图表'),file('项目-答辩PPT.pptx','交付'),file('项目-报告正文.pdf','交付'),file('项目-报告正文.docx','交付')],before=JSON.stringify(files)
+ assert.deepEqual(prioritizeArtifacts(files).map(f=>f.name),['项目-报告正文.docx','项目-报告正文.pdf','项目-答辩PPT.pptx','FIG1.png'])
+ assert.equal(JSON.stringify(files),before)
+})
+test('same-directory image formats share one card with every exact path still selectable',()=>{
+ const files=[file('FIG1.svg','图表'),file('FIG1.png','图表'),file('FIG2.png','图表')],before=JSON.stringify(files),cards=groupArtifactCards(files)
+ assert.equal(cards.length,2);assert.equal(cards[0].files.length,2);assert.equal(selectedArtifactVariant(cards[0]).name,'FIG1.png')
+ assert.equal(selectedArtifactVariant(cards[0],files[0].path).path,files[0].path);assert.equal(JSON.stringify(files),before)
+})
+test('same-name images from different folders remain distinct and label their origin',()=>{
+ const files=[file('FIG1.svg','图表'),file('FIG1.png','报告/图表')],cards=groupArtifactCards(files)
+ assert.equal(cards.length,2);assert.notEqual(artifactSourceLabel(files[0],files),artifactSourceLabel(files[1],files))
+ assert.equal(groupArtifactCards([files[0],files[0]]).length,1)
+ assert.equal(groupArtifactCards([file('项目-报告正文.docx','交付'),file('项目-报告正文.pdf','交付')]).length,2)
 })

@@ -30,7 +30,7 @@ export function readResearchProgress(text: string): ResearchProgressHint | null 
     && currentWork === '等待团队题项清单' && state === '等待人工'
   const awaitingMaterials = phase === 'G3' && currentWork === '无'
     && state === '已阻塞' && /^等待团队提交原始数据[与和]分析计划$/u.test(nextStep)
-  return {...summary, awaitingInput: awaitingTeamItems || awaitingMaterials || researchG3Action({...summary,awaitingInput:false})?.kind==='statistics'}
+  return {...summary, awaitingInput: awaitingTeamItems || awaitingMaterials || ['statistics','materials'].includes(researchG3Action({...summary,awaitingInput:false})?.kind || '')}
 }
 
 
@@ -47,10 +47,10 @@ export function researchG3Action(progress:ResearchProgressHint|null) {
       message:'请展示当前的数据范围、分析计划、准备执行的统计方法及结果用途，并列出仍需我确认的事项。材料已核对完整时请勿重复核验或要求重传。本消息仅查看计划，暂不执行统计，等待我明确批准。',
     }
   }
-  if(waiting && /^等待.*(?:上传|提交|提供).*(?:原始数据|数据CSV|CSV|分析计划)/iu.test(next)){
+  if(waiting && /^(?:等待|等|待)/u.test(next) && /(?:原始数据|回收(?:数据|答卷)|问卷数据|数据CSV|CSV|分析计划)/iu.test(next)){
     return {
       kind:'materials' as const,badge:'待补充材料',label:'查看缺少的材料清单',
-      description:'当前进度记录要求补充材料。请先查看具体缺口，再上传对应文件。',
+      description:'当前需要补充：'+progress.nextStep.replace(/^(?:等待|等|待)(?:团队|用户)?(?:上传|提交|提供|交付)?/u,'')+'。可上传已有数据，或查看平台回收情况；采用答卷前需选择问卷版本、收集批次并确认份数。',
       message:'请逐项列出本研究确实缺少的文件、字段或分析计划，并说明已有文件是否已读取及具体缺口。已核对完整的材料无需重复核验。本消息只请求说明，暂不执行统计。',
     }
   }

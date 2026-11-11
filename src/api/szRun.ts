@@ -101,7 +101,7 @@ export function normalizeResearchInterrupt(interrupt: AguiInterrupt): ResearchFo
   return { interruptId:id, toolName, title:existing.title, message:existing.message, fields }
 }
 
-function validateField(field: ResearchField, value: unknown): void {
+export function validateResearchField(field: ResearchField, value: unknown): void {
   const empty = value === null || value === undefined || typeof value === 'string' && !value.trim() || Array.isArray(value) && value.length === 0
   if (empty) { if (field.required) throw new Error('请填写：' + field.label); return }
   if (field.kind === 'checkbox-group') {
@@ -126,7 +126,7 @@ export function makeResearchResume(interrupts: AguiInterrupt[], answers: Record<
     if (!values || typeof values !== 'object') throw new Error('请先回答全部待确认表单。')
     if(Object.keys(values).some(key=>!form.fields.some(field=>field.key===key)))throw new Error('答复包含无法识别的字段，未提交。')
     const clean: Record<string, unknown> = {}
-    for (const field of form.fields) { const value = values[field.key]; validateField(field, value); if (value !== undefined) clean[field.key] = value }
+    for (const field of form.fields) { const value = values[field.key]; validateResearchField(field, value); if (value !== undefined) clean[field.key] = value }
     if (form.toolName === 'ui_gate' && !['通过', '不通过'].includes(String(clean.decision))) throw new Error('审核结论只能选择通过或不通过。')
     if(form.toolName==='plan_exit'){
       const approved=clean.decision==='同意按此计划执行'

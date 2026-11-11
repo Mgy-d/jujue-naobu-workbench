@@ -4,7 +4,9 @@ import {readResearchProgress} from '@/utils/researchProgress'
 
 // Agent text is untrusted. Raw HTML stays escaped and unsafe link schemes stay disabled.
 const markdown = new MarkdownIt({html:false,breaks:true,linkify:false})
-function renderMarkdown(text:string):string {return markdown.render(text).replace(/<li>\s*(?:<p>\s*<\/p>\s*)?<\/li>/g,'').replace(/<(ol|ul)(?: [^>]*)?>\s*<\/\1>/g,'')}
+import {readableResearchText as readablePhases} from './researchDisplayText'
+export {readablePhases}
+function renderMarkdown(text:string):string {return markdown.render(readablePhases(text)).replace(/<li>\s*(?:<p>\s*<\/p>\s*)?<\/li>/g,'').replace(/<(ol|ul)(?: [^>]*)?>\s*<\/\1>/g,'')}
 
 /** Hide tagged reasoning, including incomplete streaming blocks, outside code fences. */
 export function researchVisibleText(text:string):string {
@@ -38,9 +40,17 @@ export function researchVisibleText(text:string):string {
   return stripResearchToolMarkup(output.join('\n'))
 }
 
+/** Known machine-directed reminders are excluded from presentation, not from stored evidence. */
+export function isResearchAutomaticReminder(text:string):boolean {
+ // Match the observed transport-only envelope, never arbitrary tagged user prose.
+ const emptyReplyReminder=/^\s*(?:<system-reminder>\s*Your previous reply had empty content\s*-\s*the full answer was written to the reasoning channel only\.\s*Reply again and write the final answer into the content channel\.\s*<\/system-reminder>\s*)+$/i
+ if(emptyReplyReminder.test(text))return true
+ return /^\s*(?:\[declarative-ending\]\s*)?\[停滞自检\]\s*平台检测到/u.test(text)
+  && /平台自动提醒/u.test(text) && /\[平台台账\]/u.test(text)
+}
 /** Only platform-generated leading envelopes qualify, never quoted user prose. */
 export function isResearchPlatformNotice(text:string):boolean {
-  return /^\s*\[异步任务完成通知\]\s*收到以下来自后台子智能体的完成事件[，,]/u.test(text)
+  return isResearchAutomaticReminder(text)||/^\s*\[异步任务完成通知\]\s*收到以下来自后台子智能体的完成事件[，,]/u.test(text)
 }
 function platformNoticeHtml(text:string):string {
   if(/(?:^|\n)\s*\[run-failure-retry\]/.test(text))return ''
@@ -143,6 +153,7 @@ export function renderUserFacingAssistant(source:string):string {
 }
 
 export function renderResearchMessage(text:string, role:'user'|'assistant'):string {
+  if(isResearchAutomaticReminder(text))return ''
   if(isResearchPlatformNotice(text))return platformNoticeHtml(researchVisibleText(text))
   if(role==='assistant'){
     if(readResearchProgress(text))text=text.slice(0,text.lastIndexOf('[进度]')).trimEnd()
@@ -160,5 +171,5 @@ export function renderResearchMessage(text:string, role:'user'|'assistant'):stri
     }
     return renderUserFacingAssistant(text)
   }
-  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\r?\n/g,'<br />')
+  return readablePhases(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\r?\n/g,'<br />')
 }

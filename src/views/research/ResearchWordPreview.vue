@@ -12,7 +12,7 @@ import {ref,watch,onBeforeUnmount} from 'vue'
 import {authSnapshot,sameAuth,AUTH_CHANGE_EVENT} from '@/api/http'
 import {renderResearchWord,WORD_MAX_BYTES} from '@/utils/researchWordPreview'
 import {fetchResearchWordFile} from '@/api/researchWordFile'
-const props=defineProps<{agentId:string;threadId:string;path:string}>()
+const props=defineProps<{agentId:string;threadId:string;path:string;readFile?:(signal:AbortSignal)=>Promise<Blob>}>()
 const loading=ref(false),error=ref(''),html=ref(''),downloadUrl=ref('')
 let controller:AbortController|undefined,ticket=0
 function clear(){controller?.abort();ticket++;html.value='';if(downloadUrl.value)URL.revokeObjectURL(downloadUrl.value);downloadUrl.value=''}
@@ -20,7 +20,7 @@ async function load(){
  clear();const current=++ticket,auth=authSnapshot();controller=new AbortController();loading.value=true;error.value=''
  const valid=()=>current===ticket&&sameAuth(auth)
  try{
-  const response=await fetchResearchWordFile(props.agentId,props.threadId,props.path,controller.signal)
+  const response=props.readFile?new Response(await props.readFile(controller.signal)):await fetchResearchWordFile(props.agentId,props.threadId,props.path,controller.signal)
   if(!valid())return
   if(!response.ok){const detail=await response.json().catch(()=>null);throw Error('Word 原文件下载失败（HTTP '+response.status+'）'+(typeof detail?.message==='string'?'：'+detail.message:'，请核对文件路径、会话归属及平台下载接口。'))}
   if(Number(response.headers.get('content-length'))>WORD_MAX_BYTES)throw Error('Word 文件超过20MB，暂不能在页面预览。')

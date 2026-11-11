@@ -1,3 +1,5 @@
+import {replayJournalKey,type ReplayForm} from '@/utils/researchReplayRecord'
+import {researchFormPresentation} from '@/utils/researchFormPresentation'
 import {canMessageCompletedResearch} from '@/utils/researchConversationReadiness'
 import { isUnresolvedInterruptsError } from '@/api/interruptRelease'
 import { readResearchProgress, type ResearchProgressHint } from '@/utils/researchProgress'
@@ -65,6 +67,8 @@ export class ResearchRunSession {
   status:State = 'idle'; error = ''; notice = ''; probeText = ''; probePassed = false
   messages:ResearchMessage[] = []; interrupts:AguiInterrupt[] = []; artifacts:ArtifactNode[] = []; preview:ArtifactContent|null = null
   formSubmission:FormSubmissionFeedback|null = null
+  artifactBusy = false; previewBusy = false; artifactError = ""; previewError = ""
+  private artifactRequest = 0; private previewRequest = 0
   busy = false; stopping = false; halted = false
   private epoch = 0; private controller:AbortController|null = null; private verifiedKey = ''
   constructor(private storage:Pick<Storage,'getItem'|'setItem'>, private services:ResearchRunServices, private owner:()=>string, private uuid:()=>string = ()=>crypto.randomUUID()) {}
@@ -83,7 +87,7 @@ export class ResearchRunSession {
     this.baseline=saveResearchIdentity(this.storage,this.scope,this.baseline,next)
     this.identity=next
   }
-  private invalidate() { this.formSubmission=null;this.epoch++;this.controller?.abort();this.controller=null;this.busy=false;this.stopping=false }
+  private invalidate() { this.artifactRequest++;this.previewRequest++;this.artifactBusy=false;this.previewBusy=false;this.artifactError="";this.previewError="";this.formSubmission=null;this.epoch++;this.controller?.abort();this.controller=null;this.busy=false;this.stopping=false }
   dispose() { this.recoveryDiagnostic=null;this.reportedProgress=null;this.lastStatusCheckAt='';this.serverPhase='';this.nextStage='';this.invalidate();this.verifiedKey='';this.probePassed=false;this.scope=null;this.identity=null;this.halted=false;this.messages=[];this.interrupts=[];this.artifacts=[];this.preview=null }
   async select(scope:ResearchScope) {
     if(this.scope && this.scope.ownerId===scope.ownerId && this.scope.agentId===scope.agentId && this.scope.taskId===scope.taskId && this.owner()===scope.ownerId)return
@@ -111,7 +115,7 @@ export class ResearchRunSession {
     }catch(e){if(!this.active(epoch))return;this.probePassed=false;this.status='uncertain';this.error=description(e)}
     finally{clearTimeout(timer);if(this.active(epoch)){this.busy=false;this.controller=null}}
   }
-  async start(text:string, options: {requireModelProbe?:boolean;allowIdleMessage?:boolean;recoverExpiredGate?:boolean} = {}) {
+  async start(text:string, options: {requireModelProbe?:boolean;allowIdleMessage?:boolean;recoverExpiredGate?:boolean;onIssued?:()=>void} = {}) {
     if (!this.scope || this.busy || this.stopping || this.halted || !text.trim()) return
     if (this.identity?.unresolvedInterrupts) {this.status='uncertain';this.error=this.pendingRecoveryMessage();this.notice='请先核对原会话的待答表单，当前内容未发送。';return}
     if (options.requireModelProbe !== false && !this.probePassed) {this.error='请先测试模型响应，再启动研究。';return}
@@ -135,7 +139,8 @@ export class ResearchRunSession {
         if(status.manualAttention){
           const transcript=await this.services.transcript(scope.agentId,this.identity.threadId)
           if(!this.active(epoch) || !this.identity)return
-          if(!options.allowIdleMessage || !this.manualResumeClear(transcript.messages,this.identity))throw Error('人工接续前仍需核对原会话的工具结果和审核状态，当前内容未发送。')
+          if(!options.allowIdleMessage || !(status.expiredReviewClosed ? canMessageCompletedResearch(transcript.messages,this.identity) : this.manualResumeClear(transcript.messages,this.identity)))throw Error('接续请求未发送：原会话仍有未核实的表单或审核结果，请先核对待答事项。')
+          completedConversation=true
         }
         if(!completedConversation && (status.continuationUnknown || options.allowIdleMessage && (live===null || this.status==='uncertain'))){
           const transcript = await this.services.transcript(scope.agentId,this.identity.threadId)
@@ -152,15 +157,17 @@ export class ResearchRunSession {
       }
       let identity=this.identity || createResearchIdentity(scope,this.uuid)
       const runId='run-'+this.uuid()
-      identity={...identity,runId,status:'running',pendingIds:[],submittedIds:[]}
+      identity={...identity,runId,status:'running',pendingIds:[],submittedIds:[],resolvedIds:[]}
       this.persist(identity)
       this.formSubmission=null
-      this.status='running';this.interrupts=[];this.preview=null;this.notice='请求已发出，等待服务端运行事件。'
+      this.status='running';this.interrupts=[];this.notice='请求已发出，等待服务端运行事件。'
       const runIdentity:ResearchIdentity={agentId:scope.agentId,projectId:identity.projectId,threadId:identity.threadId,runId}
       const request=buildResearchRequest(runIdentity,'【项目ID】'+identity.projectId+'\n'+text)
       this.messages.push({id:request.messages[0]!.id,role:'user',text,local:true,at:Date.now()})
       issued=true
-      const result=await this.services.run(runIdentity,request,event=>this.onEvent(epoch,runIdentity,event),ctl.signal)
+      const response=this.services.run(runIdentity,request,event=>this.onEvent(epoch,runIdentity,event),ctl.signal)
+      options.onIssued?.()
+      const result=await response
       if(!this.active(epoch))return
       await this.applyResult(epoch,result,[])
     } catch(e) { if(!this.active(epoch))return;if(isUnresolvedInterruptsError(description(e))){this.recordPendingRejection();return}this.status='uncertain';this.notice=issued?'本次请求已发出，结果需要核对。':'本次内容尚未发送，已保留输入。';this.error=description(e)+(issued?' 当前运行结果需核对，未自动重试。':'');if(this.identity && this.identity.status==='running'){try{this.persist({...this.identity,status:'uncertain'})}catch{}} }
@@ -213,19 +220,46 @@ export class ResearchRunSession {
     if(live===null)return identity.pendingIds.length>0 && identity.pendingIds.every(id=>timeoutResult(id.split(':').slice(1).join(':')))
     return true
   }
+  private formWasResolved(messages:SessionTextMessage[], identity:StoredResearchIdentity, id:string, successful=successfulResearchHitlIds(messages)) {
+    const toolId=id.split(':').slice(1).join(':')
+    if(!toolId || conflictingResearchHitlIds(messages).has(toolId))return false
+    // A later explicit failure always overrides a cached historical success.
+    if(messages.some(message=>message.content.some(raw=>{
+      const block=raw as {type:string;id?:string;state?:string}
+      return block.type==='tool_result' && block.id===toolId && block.state!=='success'
+    })))return false
+    return successful.has(toolId) || !!identity.resolvedIds?.includes(id)
+  }
+  private rememberResolvedForms(messages:SessionTextMessage[]) {
+    if(!this.identity || conflictingResearchHitlIds(messages).size)return
+    const successful=successfulResearchHitlIds(messages)
+    const resolvedIds=[...new Set([...(this.identity.resolvedIds||[]),...[...this.identity.pendingIds,...this.identity.submittedIds].filter(id=>successful.has(id.split(':').slice(1).join(':')))])]
+    if(JSON.stringify(resolvedIds)!==JSON.stringify(this.identity.resolvedIds||[]))this.persist({...this.identity,resolvedIds})
+  }
   private recordedFormsResolved(messages:SessionTextMessage[],identity:StoredResearchIdentity) {
     const conflicts=conflictingResearchHitlIds(messages)
     if(conflicts.size)return false
     const successful=successfulResearchHitlIds(messages)
     return [...identity.pendingIds,...identity.submittedIds].every(id=>{
       const toolId=id.split(':').slice(1).join(':')
-      return !!toolId && successful.has(toolId)
+      return !!toolId && this.formWasResolved(messages,identity,id,successful)
     })
   }
   private manualResumeClear(messages:SessionTextMessage[],identity:StoredResearchIdentity) {
-    if(!this.recordedFormsResolved(messages,identity))return false
-    const resolved=collectResolvedToolCallIds(messages as never[])
-    return !messages.some(message=>message.content.some(block=>{
+    // Audit decisions remain protected; old file/script traces are not user decisions.
+    const auditIds=new Set([...identity.pendingIds,...identity.submittedIds].map(id=>id.split(':').slice(1).join(':')))
+    for(const message of messages)for(const block of message.content){
+      const call=block as {type:string;id?:string;name?:string}
+      if(call.type==='tool_call' && ['ui_gate','ui_form_advanced','plan_exit'].includes(call.name || '') && call.id)auditIds.add(call.id)
+    }
+    const auditMessages=messages.map(message=>({...message,content:message.content.filter(block=>{
+      const item=block as {type:string;id?:string;name?:string}
+      return item.type==='tool_call' && ['ui_gate','ui_form_advanced','plan_exit'].includes(item.name || '')
+        || item.type==='tool_result' && !!item.id && auditIds.has(item.id)
+    })}))
+    if(!this.recordedFormsResolved(auditMessages,identity))return false
+    const resolved=collectResolvedToolCallIds(auditMessages as never[])
+    return !auditMessages.some(message=>message.content.some(block=>{
       const call=block as {type:string;id?:string}
       return call.type==='tool_call' && (!call.id || !resolved.has(call.id))
     }))
@@ -257,7 +291,7 @@ export class ResearchRunSession {
     const knownIds = [...identity.pendingIds,...identity.submittedIds]
     if(knownIds.some(id=>{
       const toolId = id.split(':').slice(1).join(':')
-      return !toolId || conflicts.has(toolId) || !successful.has(toolId)
+      return !toolId || conflicts.has(toolId) || !this.formWasResolved(messages,identity,id,successful)
     }))return null
     return hint
   }
@@ -343,7 +377,7 @@ export class ResearchRunSession {
       this.persist({...this.identity,status:'uncertain',pendingIds:[]});this.notice='';this.status='uncertain';this.error='本轮回复已结束，但后台状态无法核对，请恢复会话。'+description(e)
     }
   }
-  async submit(answers:Record<string,Record<string,unknown>>) {
+  async submit(answers:Record<string,Record<string,unknown>>, onIssued?:()=>void) {
     if(!this.scope || !this.identity || this.status!=='interrupt' || this.busy || this.stopping)return
     const epoch=this.epoch, scope={...this.scope}, previous=[...this.interrupts]
     const identity:ResearchIdentity={agentId:scope.agentId,projectId:this.identity.projectId,threadId:this.identity.threadId,runId:this.identity.runId}
@@ -373,7 +407,30 @@ export class ResearchRunSession {
       this.persist({...this.identity,status:'submitting',submittedIds:[...new Set([...this.identity.submittedIds,...previous.map(idOf)])]})
       this.status='running';this.nextStage='';this.notice='正在提交表单并等待服务端回应。';issued=true
       this.formSubmission!.issued=true
-      const result=await this.services.run(identity,request,event=>this.onEvent(epoch,identity,event),ctl.signal)
+      const response=this.services.run(identity,request,event=>this.onEvent(epoch,identity,event),ctl.signal)
+      // A compact user bubble records exactly what was issued, not an approval inference.
+      const answerId='form-answer:'+identity.runId+':'+previous.map(idOf).sort().join('|')
+      const journalKey=replayJournalKey(scope.ownerId,scope.agentId,scope.taskId,identity.threadId)
+      try{
+        const history=JSON.parse(this.storage.getItem(journalKey)||'[]') as ReplayForm[]
+        if(!Array.isArray(history))throw Error('表单历史格式无效')
+        for(const item of previous){const form=normalizeResearchInterrupt(item);if(!history.some(entry=>entry.id===form.interruptId))history.push({id:form.interruptId,form,answers:JSON.parse(JSON.stringify(answers[form.interruptId]||{})),afterMessageId:this.messages.at(-1)?.id||'',answerMessageId:answerId,phase:this.serverPhase||/\bG[1-4]\b/.exec(form.title)?.[0]||'',submitted:true})}
+        this.storage.setItem(journalKey,JSON.stringify(history))
+      }catch{this.notice='本次请求已发出，但表单演示记录未能保存在本机。'}
+      const answerText=previous.map(item=>{
+        const form=normalizeResearchInterrupt(item), view=researchFormPresentation(form)
+        const fields=form.fields.flatMap(field=>{
+          const value=answers[form.interruptId]?.[field.key]
+          if(value===undefined || value===null || value==='' || Array.isArray(value)&&!value.length)return []
+          const values=Array.isArray(value)?value:[value]
+          const shown=values.map(value=>view.option(field,String(value)).title).join('、')
+          return [view.label(field)+'：'+shown]
+        })
+        return [view.title,...fields].join('\n')
+      }).join('\n\n')
+      if(!this.messages.some(message=>message.id===answerId))this.messages.push({id:answerId,role:'user',text:answerText,local:true,at:Date.now()})
+      onIssued?.()
+      const result=await response
       if(!this.active(epoch))return
       if(this.formSubmission && Object.values(result.texts).some(text=>text.trim())){
         this.formSubmission.replyAt ??= Date.now()
@@ -391,19 +448,46 @@ export class ResearchRunSession {
     if(!feedback || feedback.checking || !this.scope || !this.identity || this.halted)return
     const epoch=this.epoch,scope={...this.scope},identity={...this.identity}
     feedback.checking=true
+    const messagesAtCheck=JSON.stringify(this.messages)
     try{
-      const state=await this.services.runStatus(scope.agentId,identity.threadId)
+      const [statusResult,transcriptResult,progressResult,pendingResult]=await Promise.allSettled([
+        this.services.runStatus(scope.agentId,identity.threadId),
+        this.services.transcript(scope.agentId,identity.threadId),
+        this.services.progress?.(scope.agentId,identity.threadId) ?? Promise.resolve(null),
+        this.services.pending(scope.agentId,identity.threadId),
+      ])
       if(!this.active(epoch) || this.formSubmission!==feedback || this.identity?.runId!==identity.runId)return
       feedback.checkedAt=Date.now();feedback.checkFailed=false
-      feedback.checkMessage=state.running?'服务端报告会话仍在运行'
+      if(transcriptResult.status==='fulfilled' && JSON.stringify(this.messages)===messagesAtCheck){
+        const before=JSON.stringify(this.messages)
+        const merged=mergeTranscript(this.messages.map(message=>({...message,at:message.at ?? 0})),transcriptResult.value.messages || [])
+        const known=new Set(merged.flatMap(message=>[message.id,message.remoteId].filter(Boolean)))
+        this.messages=[...merged,...this.messages.filter(message=>!known.has(message.id)&&!known.has(message.remoteId))]
+        this.rememberReportedProgress()
+        if(JSON.stringify(this.messages)!==before)feedback.lastEventAt=Date.now()
+      }
+      if(progressResult.status==='fulfilled' && progressResult.value?.sessionId===identity.threadId){
+        const snapshot=progressResult.value
+        const report=readResearchProgress(snapshot.progressLine || snapshot.lastText || '')
+        if(report){this.reportedProgress=report;this.serverPhase=report.phase}
+      }
+      if(statusResult.status==='rejected')throw statusResult.reason
+      const state=statusResult.value
+      const incomplete=transcriptResult.status==='rejected'||pendingResult.status==='rejected'||progressResult.status==='rejected'
+      feedback.checkFailed=incomplete
+      feedback.checkMessage=incomplete?'部分同步失败，已保留最近读取内容，请重新核对'
+        :pendingResult.status==='fulfilled' && pendingResult.value.some(item=>!identity.submittedIds.includes(idOf(item)))?'服务端已返回后续待答事项，正在核对原运行身份'
+        :state.running?'服务端报告会话仍在运行'
         :state.pendingWork?'服务端报告后台仍有待处理工作'
         :state.awaitingInput?'服务端报告正在等待输入，请核对最新回复'
         :state.continuationUnknown || state.continuationPlanned?'服务端尚未确认下一步状态'
         :'服务端报告会话空闲，等待本次请求返回或核对会话'
+      if(['working','running'].includes(this.status))this.notice=feedback.checkMessage
     }catch{
       if(this.active(epoch) && this.formSubmission===feedback){
         feedback.checkedAt=Date.now();feedback.checkFailed=true
         feedback.checkMessage='本次状态核对失败，暂时无法确认后台进展'
+        if(['working','running'].includes(this.status))this.notice=feedback.checkMessage
       }
     }finally{
       if(this.active(epoch) && this.formSubmission===feedback)feedback.checking=false
@@ -486,6 +570,8 @@ export class ResearchRunSession {
       if(identity.submittedIds.some(id=>conflicts.has(id.split(':').slice(1).join(':')))){
         this.halt('审核存在重复结果或平台超时冲突，已停止推进；请核对平台持久记录。');return
       }
+      this.rememberResolvedForms(transcript.messages)
+      if(this.identity)identity.resolvedIds=this.identity.resolvedIds
       this.messages=mergeTranscript(this.messages.map(message=>({...message,at:message.at ?? 0})),transcript.messages || [])
       this.rememberReportedProgress()
       // Keep readable messages even if a separate status/pending request failed.
@@ -538,7 +624,7 @@ export class ResearchRunSession {
       // A resume can still own its SDK registration while the model is running.
       // Keep submitted IDs and wait for an idle snapshot before judging revival.
       const hasSubmittedPending = pending.some(item=>identity.submittedIds.includes(idOf(item)))
-      if((status.running || status.pendingWork) && (!pending.length || hasSubmittedPending)){
+      if((status.running || status.pendingWork) && (!pending.length || pending.every(item=>identity.submittedIds.includes(idOf(item))))){
         this.interrupts=[];this.status='working'
         this.notice=hasSubmittedPending ? '已提交的表单仍在服务端处理中，正在核对处理结果。' : '运行接口报告会话仍在运行，当前没有返回待答表单；下方进度为会话最近报告的记录。'
         return
@@ -605,11 +691,11 @@ export class ResearchRunSession {
         return
       }
       if(status.manualAttention){
-        if(!this.manualResumeClear(transcript.messages,identity))throw Error('平台已停止自动补醒，但原会话仍有未核实的工具或审核结果，请先核对待答事项。')
+        if(!(status.expiredReviewClosed ? canMessageCompletedResearch(transcript.messages,identity) : this.manualResumeClear(transcript.messages,identity)))throw Error('核对未通过：原会话仍有未核实的表单或审核结果，尚不能发送接续请求。')
         const live=this.services.live ? await this.services.live(scope.agentId,identity.threadId) : null
         if(!this.active(epoch))return
         if(live?.length)throw Error('原会话仍有实时待答事项，请先恢复对应表单。')
-        this.status='awaiting';this.error='';this.notice='平台已停止自动补醒，当前会话及后台任务均空闲。可以在原对话发送说明或补充材料；研究阶段仍需人工确认。'
+        this.status='awaiting';this.error='';this.notice=status.expiredReviewClosed ? '原审批已超时关闭，可以在原对话补充说明或材料；不会自动通过审核。' : '平台已停止自动补醒，当前会话及后台任务均空闲。可以在原对话发送说明或补充材料；研究阶段仍需人工确认。'
         return
       }
       if(status.continuationPlanned){this.status='working';this.notice='进度台账仍有待推进工作；这不代表子任务当前仍在执行，请核对会话。';return}
@@ -631,11 +717,12 @@ export class ResearchRunSession {
         }
       }
       if(status.continuationUnknown){this.status='uncertain';this.error='当前后台未提供待办状态，进度台账也无法确认，请恢复会话核对。';this.notice='会话消息已读取，但后台下一步分类仍不明确。需要结合当前待答表单及会话记录核对。';return}
-      const unresolved=identity.pendingIds.filter(id=>{const toolId=id.split(':').slice(1).join(':');return !toolId || !resolved.has(toolId)})
+      const unresolved=identity.pendingIds.filter(id=>!this.formWasResolved(transcript.messages,identity,id))
       if(unresolved.length){this.status='uncertain';this.error='无法核对已记录的待答表单，请勿重复提交。';return}
+      if(this.identity)this.persist({...this.identity,pendingIds:[],status:'finished'})
       if(status.awaitingInput){this.nextStage=status.nextStage || '';this.status='awaiting';this.notice='本轮回复已结束；服务端等待后续输入，当前没有登记待审核表单。';return}
       this.status='finished';this.notice='会话当前空闲；以真实产物与人工确认判断研究进度。'
-    } catch(e){if(!this.active(epoch))return;this.notice='';this.status='uncertain';this.nextStage='';this.interrupts=[];this.artifacts=[];this.preview=null;if(this.messages.length)this.notice='当前显示已读取的会话内容，最新状态仍需核对。';if(description(e).includes('已答中断'))this.halt(description(e));else this.error=description(e)}
+    } catch(e){if(!this.active(epoch))return;this.notice='';this.status='uncertain';this.nextStage='';this.interrupts=[];if(this.messages.length)this.notice='当前显示已读取的会话内容，最新状态仍需核对。';if(description(e).includes('已答中断'))this.halt(description(e));else this.error=description(e)}
     finally{if(this.active(epoch))this.busy=false}
   }
   async stopServer() {
@@ -652,19 +739,23 @@ export class ResearchRunSession {
   }
   stop() {if(!this.busy)return;this.invalidate();this.status='uncertain';this.error='已停止本页接收；服务端任务可能仍在运行，请先恢复会话核对。';if(this.identity)try{this.persist({...this.identity,status:'uncertain'})}catch{}}
   async refreshArtifacts() {
-    if(!this.scope || !this.identity || this.busy)return
-    const epoch=this.epoch,scope={...this.scope},thread=this.identity.threadId;this.busy=true;this.error=''
-    try {const tree=await this.services.tree(scope.agentId,thread);if(!this.active(epoch))return;if(!Array.isArray(tree))throw Error('产物树格式无效。');this.artifacts=tree;this.notice=tree.length?'产物列表已读取，请核对具体路径及所属运行。':'当前会话没有可读取的产物。'}
-    catch(e){if(this.active(epoch)){this.artifacts=[];this.preview=null;this.error=description(e)}}
-    finally{if(this.active(epoch))this.busy=false}
+    if(!this.scope || !this.identity || this.artifactBusy)return
+    const epoch=this.epoch,scope={...this.scope},thread=this.identity.threadId,ticket=++this.artifactRequest
+    const current=()=>this.active(epoch)&&this.identity?.threadId===thread&&ticket===this.artifactRequest
+    this.artifactBusy=true;this.artifactError=''
+    try {const tree=await this.services.tree(scope.agentId,thread);if(!current())return;if(!Array.isArray(tree))throw Error('产物树格式无效。');this.artifacts=tree}
+    catch(e){if(current())this.artifactError='成果刷新失败，保留上次读取的文件。'+description(e)}
+    finally{if(current())this.artifactBusy=false}
   }
   async previewArtifact(path:string) {
-    if(!this.scope || !this.identity || this.busy)return
+    if(!this.scope || !this.identity)return
     const all=(nodes:ArtifactNode[]):ArtifactNode[]=>nodes.flatMap(n=>[n,...(n.children?all(n.children):[])])
-    if(!all(this.artifacts).some(n=>n.type==='file' && n.path===path)){this.error='请选择当前会话产物树中的文件。';return}
-    const epoch=this.epoch,scope={...this.scope},thread=this.identity.threadId;this.busy=true;this.preview=null;this.error=''
-    try{const result=await this.services.read(scope.agentId,thread,path);if(!this.active(epoch))return;if(result.path!==path)throw Error('产物返回路径不匹配。');this.preview=result}
-    catch(e){if(this.active(epoch))this.error=description(e)}finally{if(this.active(epoch))this.busy=false}
+    if(!all(this.artifacts).some(n=>n.type==='file' && n.path===path)){this.previewError='请选择当前会话产物树中的文件。';return}
+    const epoch=this.epoch,scope={...this.scope},thread=this.identity.threadId,ticket=++this.previewRequest
+    const current=()=>this.active(epoch)&&this.identity?.threadId===thread&&ticket===this.previewRequest
+    this.previewBusy=true;this.preview=null;this.previewError=''
+    try{const result=await this.services.read(scope.agentId,thread,path);if(!current())return;if(result.path!==path)throw Error('产物返回路径不匹配。');this.preview=result}
+    catch(e){if(current())this.previewError=description(e)}finally{if(current())this.previewBusy=false}
   }
 }
 

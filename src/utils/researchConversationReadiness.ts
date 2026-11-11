@@ -1,7 +1,7 @@
 type IdentityHistory={pendingIds:string[];submittedIds:string[]}
 const record=(value:unknown):Record<string,unknown>|null=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null
 /**
- * Called only after a fresh same-session COMPLETED + idle parent/background and
+ * Called only after a fresh same-session COMPLETED or explicit expired-review closure, idle parent/background and
  * empty current form registries. Permission for an ordinary message, never for
  * resume/approval. Incomplete historical tool traces do not prove a current lock.
  */
